@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Fleet Compliance Log</title>
+<meta name="theme-color" content="#12161C" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap');
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #12161C; color: #EDEFF2; font-family: 'Inter', system-ui, sans-serif; }
+  body { padding: 18px 14px 40px; }
+  ::placeholder { color: #5B6472; }
+  input:focus-visible, button:focus-visible, textarea:focus-visible { outline: 2px solid #F4C41E; outline-offset: 2px; }
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cursor: pointer; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  .header-row { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+  .title { font-family: 'JetBrains Mono', monospace; font-size: clamp(16px, 4.5vw, 20px); font-weight: 800; letter-spacing: -0.02em; margin: 0; }
+  .subtitle { font-size: 12.5px; color: #8A93A3; margin: 4px 0 16px; }
+  .sync-live { color: #3FB27F; font-size: 11px; display: inline-flex; align-items: center; gap: 4px; }
+  .sync-connecting { color: #8A93A3; font-size: 11px; }
+  .sync-offline { color: #F2A93B; font-size: 11px; }
+  .sync-error { color: #E5484D; font-size: 11px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; background: currentColor; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 14px; }
+  .stat-block { text-align: left; cursor: pointer; background: #1B212B; border: 1px solid #2B3441; border-radius: 7px; padding: 10px 12px; font: inherit; color: inherit; }
+  .stat-block.active { background: #232B37; }
+  .stat-num { font-family: 'JetBrains Mono', monospace; font-weight: 800; font-size: clamp(20px, 6vw, 26px); line-height: 1.1; }
+  .stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #8A93A3; margin-top: 2px; font-weight: 600; }
+  .search-wrap { position: relative; margin-bottom: 12px; }
+  .search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: #5B6472; pointer-events: none; }
+  .text-input, .date-input, .number-input, textarea { background: #12161C; border: 1px solid #2B3441; border-radius: 6px; padding: 7px 9px; color: #EDEFF2; font-size: 13px; font-family: 'Inter', sans-serif; outline: none; width: 100%; }
+  .date-input { width: auto; min-width: 140px; font-family: 'JetBrains Mono', monospace; color-scheme: dark; }
+  .number-input { width: 118px; }
+  #search-input { padding-left: 29px; }
+  .vehicle-list { display: flex; flex-direction: column; gap: 8px; }
+  .vehicle-row { background: #1B212B; border: 1px solid #2B3441; border-radius: 8px; overflow: hidden; }
+  .vehicle-row.expanded { border-color: #3A4553; }
+  .vehicle-row.inactive { opacity: 0.6; }
+  .row-summary { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: transparent; border: none; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+  .plate-chip { display: inline-flex; align-items: stretch; border-radius: 5px; overflow: hidden; border: 2px solid #24242A; box-shadow: 0 1px 2px rgba(0,0,0,0.45); flex-shrink: 0; }
+  .plate-tab { width: 5px; background: #155EA8; }
+  .plate-text { background: #F4C41E; color: #15161A; font-family: 'JetBrains Mono', monospace; font-weight: 800; padding: 4px 8px; letter-spacing: 0.5px; font-size: 13px; white-space: nowrap; }
+  .row-mid { flex: 1; min-width: 0; }
+  .row-status { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-chassis { font-size: 10.5px; color: #5B6472; margin-top: 1px; }
+  .status-dots { display: flex; gap: 4px; flex-shrink: 0; }
+  .status-dot { width: 18px; height: 18px; border-radius: 5px; font-size: 8.5px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .chevron { flex-shrink: 0; transition: transform 0.15s; color: #5B6472; }
+  .chevron.open { transform: rotate(180deg); }
+  .expand-body { padding: 12px 12px 14px; border-top: 1px solid #2B3441; display: flex; flex-direction: column; gap: 10px; animation: fadeSlide 0.16s ease-out; }
+  @keyframes fadeSlide { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .field label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #8A93A3; font-weight: 600; }
+  .compliance-block { background: #161B22; border: 1px solid #262E39; border-radius: 7px; padding: 9px 10px; }
+  .compliance-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; gap: 8px; flex-wrap: wrap; }
+  .compliance-label { font-size: 12px; font-weight: 700; color: #C3CAD4; }
+  .compliance-date-hint { font-size: 10.5px; color: #5B6472; }
+  .status-pill { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .checkbox-row { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: #8A93A3; margin-bottom: 7px; cursor: pointer; }
+  .row-fields { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .quick-btn, .btn { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .quick-btn { background: transparent; border: 1px dashed #3A4553; color: #8A93A3; padding: 6px 8px; font-size: 11px; }
+  .btn-outline { background: transparent; border: 1px solid #3A4553; color: #C3CAD4; padding: 7px 11px; font-size: 12px; }
+  .btn-primary { background: #F4C41E; border: 1px solid #F4C41E; color: #15161A; padding: 7px 13px; font-size: 12.5px; }
+  .btn-danger-text { background: transparent; border: 1px solid transparent; color: #E5484D; padding: 7px 9px; font-size: 12px; }
+  .btn-danger-filled { background: rgba(229,72,77,0.15); border: 1px solid #E5484D; color: #E5484D; padding: 7px 9px; font-size: 12px; }
+  .actions-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+  .actions-left { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .saved-flash { font-size: 11px; color: #3FB27F; }
+  .add-form { background: #1B212B; border: 1px solid #F4C41E; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .add-form-title { font-size: 13px; font-weight: 700; }
+  .add-toggle-btn { width: 100%; justify-content: center; padding: 10px; border-style: dashed; }
+  .error-text { font-size: 12px; color: #E5484D; }
+  .empty-state { text-align: center; padding: 28px 12px; color: #5B6472; font-size: 13px; }
+  .legend { margin-top: 22px; display: flex; gap: 14px; flex-wrap: wrap; font-size: 10.5px; color: #5B6472; }
+  .legend-item { display: inline-flex; align-items: center; gap: 5px; }
+  .legend-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .backup-note { margin-top: 18px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11.5px; color: #5B6472; }
+  .loading { min-height: 60vh; display: flex; align-items: center; justify-content: center; color: #5B6472; font-size: 13px; }
+  @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
+</style>
+</head>
+<body>
+<div id="root"><div class="loading">Loading your fleet…</div></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
+import {
+  getFirestore, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot,
+  enableIndexedDbPersistence
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+
+// =====================================================================
+// PASTE YOUR OWN FIREBASE CONFIG HERE (see setup steps in chat).
+// These values are not secret — they identify your project, not a password.
+// =====================================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyCtPPf6YKZ9U5cxXIu01LIXaJ_roo3gNOY",
+  authDomain: "fleet-tracker-ebd10.firebaseapp.com",
+  projectId: "fleet-tracker-ebd10",
+  storageBucket: "fleet-tracker-ebd10.firebasestorage.app",
+  messagingSenderId: "509479364229",
+  appId: "1:509479364229:web:28e7e64fd238b9d0a62bec"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
+const vehiclesCol = collection(db, 'vehicles');
+try { await enableIndexedDbPersistence(db); } catch (e) { /* multiple tabs open, or unsupported — non-fatal */ }
+
+const COMPLIANCE_TYPES = [
+  { key: 'tax', label: 'RTO Tax', short: 'Tax' },
+  { key: 'insurance', label: 'Insurance', short: 'Ins' },
+  { key: 'fitness', label: 'Fitness Certificate', short: 'Fit' },
+  { key: 'puc', label: 'PUC Certificate', short: 'PUC' },
+];
+const STATUS_RANK = { overdue: 0, soon: 1, upcoming: 2, ok: 3, lifetime: 4, unset: 5 };
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+function todayStr() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function daysFromToday(dateStr) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return Math.round((new Date(y, m - 1, d) - today) / 86400000);
+}
+function addMonthsClampEOM(dateStr, months) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const wasEOM = new Date(y, m, 0).getDate() === d;
+  const total = (y * 12 + (m - 1)) + months;
+  const ny = Math.floor(total / 12);
+  const nm0 = ((total % 12) + 12) % 12;
+  const lastDay = new Date(ny, nm0 + 1, 0).getDate();
+  const nd = wasEOM ? lastDay : Math.min(d, lastDay);
+  return `${ny}-${pad2(nm0 + 1)}-${pad2(nd)}`;
+}
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function formatDateDisplay(dateStr) {
+  if (!dateStr) return null;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return `${d} ${MONTH_NAMES[m - 1]} ${y}`;
+}
+function makeId() { return 'v-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function getComplianceStatus(vehicle, key) {
+  if (key === 'tax' && vehicle.tax.isLifetime) return { level: 'lifetime', label: 'Lifetime', days: null };
+  const data = vehicle[key] || {};
+  if (!data.dueDate) return { level: 'unset', label: 'Not set', days: null };
+  const diff = daysFromToday(data.dueDate);
+  if (diff < 0) return { level: 'overdue', label: `${Math.abs(diff)}d overdue`, days: diff };
+  if (diff === 0) return { level: 'overdue', label: 'Due today', days: 0 };
+  if (diff <= 30) return { level: 'soon', label: `${diff}d left`, days: diff };
+  if (diff <= 90) return { level: 'upcoming', label: `${diff}d left`, days: diff };
+  return { level: 'ok', label: `${diff}d left`, days: diff };
+}
+function getVehicleWorstStatus(vehicle) {
+  let worst = null;
+  for (const { key, label } of COMPLIANCE_TYPES) {
+    const s = getComplianceStatus(vehicle, key);
+    if (s.level === 'unset') continue;
+    if (!worst || STATUS_RANK[s.level] < STATUS_RANK[worst.level] ||
+        (STATUS_RANK[s.level] === STATUS_RANK[worst.level] && (s.days ?? Infinity) < (worst.days ?? Infinity))) {
+      worst = { ...s, typeLabel: label };
+    }
+  }
+  return worst || { level: 'unset', label: 'No dates set', days: null, typeLabel: null };
+}
+function statusColors(level) {
+  switch (level) {
+    case 'overdue': return { fg: '#E5484D', bg: 'rgba(229,72,77,0.14)', border: 'rgba(229,72,77,0.35)' };
+    case 'soon': return { fg: '#F2A93B', bg: 'rgba(242,169,59,0.14)', border: 'rgba(242,169,59,0.35)' };
+    case 'upcoming': return { fg: '#5B9FE3', bg: 'rgba(91,159,227,0.14)', border: 'rgba(91,159,227,0.35)' };
+    case 'ok': return { fg: '#3FB27F', bg: 'rgba(63,178,127,0.14)', border: 'rgba(63,178,127,0.35)' };
+    case 'lifetime': return { fg: '#3FB27F', bg: 'rgba(63,178,127,0.14)', border: 'rgba(63,178,127,0.35)' };
+    default: return { fg: '#8A93A3', bg: 'rgba(139,147,163,0.14)', border: 'rgba(139,147,163,0.30)' };
+  }
+}
+function emptyStateMessage(filter, search) {
+  if (search.trim()) return `No vehicles match "${escapeHtml(search.trim())}".`;
+  if (filter === 'overdue') return "Nothing overdue. You're on top of it.";
+  if (filter === 'soon') return 'Nothing due in the next 30 days.';
+  if (filter === 'missing') return 'Every active vehicle has insurance, fitness and PUC dates filled in.';
+  if (filter === 'archived') return 'No archived vehicles yet.';
+  return 'No vehicles yet — add your first one below.';
+}
+
+function mkSeed(id, vehicleNo, chassisNo, amount, dueDate) {
+  return { id, vehicleNo, chassisNo, active: true, notes: '',
+    tax: { isLifetime: false, dueDate, amount, lifetimeNote: '' },
+    insurance: { dueDate: null, amount: null }, fitness: { dueDate: null, amount: null }, puc: { dueDate: null, amount: null } };
+}
+function mkSeedLifetime(id, vehicleNo, chassisNo, lifetimeNote) {
+  return { id, vehicleNo, chassisNo, active: true, notes: '',
+    tax: { isLifetime: true, dueDate: null, amount: null, lifetimeNote },
+    insurance: { dueDate: null, amount: null }, fitness: { dueDate: null, amount: null }, puc: { dueDate: null, amount: null } };
+}
+function mkSeedArchived(id, vehicleNo, chassisNo, amount, note) {
+  return { id, vehicleNo, chassisNo, active: false, notes: note,
+    tax: { isLifetime: false, dueDate: null, amount, lifetimeNote: '' },
+    insurance: { dueDate: null, amount: null }, fitness: { dueDate: null, amount: null }, puc: { dueDate: null, amount: null } };
+}
+const SEED_VEHICLES = [
+  mkSeed('s01','CG16CN9692','01138',2000,'2026-10-31'), mkSeed('s02','CG16A2231','06873',5600,'2026-12-31'),
+  mkSeed('s03','CG16CU6147','G1452',5600,'2027-02-28'), mkSeed('s04','CG16CU9266','K3661',7000,'2026-08-31'),
+  mkSeed('s05','CG16CU4151','G1450',5600,'2027-01-31'), mkSeed('s06','CG16A2014','01460',5600,'2027-01-31'),
+  mkSeed('s07','CG10R0645','07867',5600,'2027-01-31'), mkSeed('s08','CG16CP6968','19628',7000,'2027-02-28'),
+  mkSeed('s09','CG16A2391','02264',5600,'2027-02-28'), mkSeed('s10','CG16CU9237','00716',7000,'2026-09-30'),
+  mkSeed('s11','CG16A2488','32027',2000,'2026-10-31'), mkSeed('s12','CG16CQ7400','18054',7000,'2027-01-31'),
+  mkSeed('s13','CG15AC3477','15341',7000,'2026-12-31'), mkSeed('s14','CG16CQ8970','31616',7000,'2027-02-28'),
+  mkSeed('s15','CG16CP4053','00009',1275,'2026-09-30'), mkSeed('s16','CG16CT1369','05832',1575,'2026-10-31'),
+  mkSeed('s17','CG16E1570','14832',1275,'2026-09-30'), mkSeed('s18','CG16CR4071','02438',1575,'2026-10-31'),
+  mkSeedLifetime('s19','CG16CN3554','21137','Paid till ~2035 re-registration'),
+  mkSeedLifetime('s20','CG16CT2685','44438','Paid till ~2040 re-registration'),
+  mkSeed('s21','CG16A2458','21765',3700,'2026-10-31'), mkSeed('s22','CG16CL2846','04770',325,'2026-09-30'),
+  mkSeed('s23','CG16CT2731','02957',325,'2026-09-30'), mkSeed('s24','CG15AC1901','29934',3700,'2026-09-30'),
+  mkSeedArchived('s25','CG16A2457','22242',3700,'Sold'),
+];
+
+// ---------------- app state ----------------
+let vehicles = [];
+let loaded = false;
+let syncStatus = 'connecting'; // connecting | live | offline | error
+const ui = { search: '', filter: 'all', expanded: new Set(), addOpen: false, confirmDelete: {}, justSaved: {}, addError: '' };
+const lifetimeOverride = {}; // id -> bool, only while user is actively editing the checkbox
+
+const root = document.getElementById('root');
+
+function render() {
+  const active = document.activeElement;
+  const activeId = active && active.id;
+  const selStart = active && typeof active.selectionStart === 'number' ? active.selectionStart : null;
+  const selEnd = active && typeof active.selectionEnd === 'number' ? active.selectionEnd : null;
+
+  root.innerHTML = loaded ? renderApp() : '<div class="loading">Loading your fleet…</div>';
+
+  if (activeId) {
+    const el = document.getElementById(activeId);
+    if (el) {
+      el.focus();
+      if (selStart != null && el.setSelectionRange) { try { el.setSelectionRange(selStart, selEnd); } catch (e) {} }
+    }
+  }
+}
+
+// ---------------- data layer (Firestore) ----------------
+async function ensureSeeded() {
+  const snap = await getDocs(vehiclesCol);
+  if (snap.empty) {
+    await Promise.all(SEED_VEHICLES.map(v => setDoc(doc(vehiclesCol, v.id), v)));
+  }
+}
+function subscribe() {
+  onSnapshot(vehiclesCol, (snap) => {
+    vehicles = snap.docs.map(d => d.data());
+    loaded = true;
+    syncStatus = 'live';
+    render();
+  }, (err) => {
+    syncStatus = 'error';
+    loaded = true;
+    render();
+  });
+}
+async function saveVehicleRemote(v) { await setDoc(doc(vehiclesCol, v.id), v); }
+async function deleteVehicleRemote(id) { await deleteDoc(doc(vehiclesCol, id)); }
+
+window.addEventListener('online', () => { if (syncStatus !== 'error') { syncStatus = 'live'; render(); } });
+window.addEventListener('offline', () => { syncStatus = 'offline'; render(); });
+
+// ---------------- form reading helpers ----------------
+function readVehicleFormFromDOM(id) {
+  const existing = vehicles.find(v => v.id === id) || { id, active: true };
+  const g = (f) => document.getElementById(`f_${id}_${f}`);
+  const isLT = g('tax_lifetime').checked;
+  return {
+    id: existing.id,
+    active: existing.active,
+    vehicleNo: g('vehicleNo').value.trim().toUpperCase(),
+    chassisNo: g('chassisNo').value.trim(),
+    notes: g('notes').value.trim(),
+    tax: isLT
+      ? { isLifetime: true, dueDate: null, amount: null, lifetimeNote: g('tax_note').value.trim() }
+      : { isLifetime: false, dueDate: g('tax_date').value || null, amount: g('tax_amount').value === '' ? null : Number(g('tax_amount').value), lifetimeNote: '' },
+    insurance: { dueDate: g('insurance_date').value || null, amount: g('insurance_amount').value === '' ? null : Number(g('insurance_amount').value) },
+    fitness: { dueDate: g('fitness_date').value || null, amount: g('fitness_amount').value === '' ? null : Number(g('fitness_amount').value) },
+    puc: { dueDate: g('puc_date').value || null, amount: g('puc_amount').value === '' ? null : Number(g('puc_amount').value) },
+  };
+}
+
+// ---------------- action handlers ----------------
+async function handleSaveVehicle(id) {
+  const v = readVehicleFormFromDOM(id);
+  await saveVehicleRemote(v);
+  ui.justSaved[id] = true;
+  render();
+  setTimeout(() => { delete ui.justSaved[id]; render(); }, 1500);
+}
+async function handleArchiveToggle(id) {
+  const v = vehicles.find(x => x.id === id);
+  if (!v) return;
+  await saveVehicleRemote({ ...v, active: !v.active });
+}
+async function handleDeleteConfirmed(id) {
+  await deleteVehicleRemote(id);
+  delete ui.confirmDelete[id];
+}
+async function submitAddForm() {
+  const num = document.getElementById('f_new_vehicleNo').value.trim().toUpperCase();
+  if (!num) { ui.addError = 'Enter a vehicle number.'; render(); return; }
+  if (vehicles.some(v => v.vehicleNo === num)) { ui.addError = 'That vehicle number is already tracked.'; render(); return; }
+  const v = readVehicleFormFromDOM('new');
+  v.id = makeId(); v.active = true; v.vehicleNo = num;
+  await saveVehicleRemote(v);
+  ui.addOpen = false; ui.addError = ''; delete lifetimeOverride['new'];
+  render();
+}
+function quickRenew(id, field, months) {
+  const dateInput = document.getElementById(`f_${id}_${field}_date`);
+  if (!dateInput) return;
+  dateInput.value = addMonthsClampEOM(dateInput.value || todayStr(), months);
+}
+function exportBackup() {
+  const json = JSON.stringify({ kind: 'fleet-compliance-backup', exportedAt: new Date().toISOString(), vehicles }, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `fleet-backup-${todayStr()}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ---------------- event delegation ----------------
+root.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+  if (action === 'toggle-expand') { ui.expanded.has(id) ? ui.expanded.delete(id) : ui.expanded.add(id); render(); }
+  else if (action === 'toggle-filter') { ui.filter = (ui.filter === btn.dataset.filter) ? 'all' : btn.dataset.filter; render(); }
+  else if (action === 'toggle-add') { ui.addOpen = !ui.addOpen; ui.addError=''; render(); }
+  else if (action === 'save-vehicle') { handleSaveVehicle(id); }
+  else if (action === 'archive-toggle') { handleArchiveToggle(id); }
+  else if (action === 'delete-request') { ui.confirmDelete[id] = true; render(); }
+  else if (action === 'delete-cancel') { delete ui.confirmDelete[id]; render(); }
+  else if (action === 'delete-confirm') { handleDeleteConfirmed(id); }
+  else if (action === 'quick-renew') { quickRenew(id, btn.dataset.field, Number(btn.dataset.months)); }
+  else if (action === 'add-submit') { submitAddForm(); }
+  else if (action === 'export-backup') { exportBackup(); }
+});
+root.addEventListener('change', (e) => {
+  if (e.target.matches('[data-lifetime-checkbox]')) {
+    lifetimeOverride[e.target.dataset.id] = e.target.checked;
+    render();
+  }
+});
+root.addEventListener('input', (e) => {
+  if (e.target.id === 'search-input') { ui.search = e.target.value; render(); }
+});
+
+// ---------------- render templates ----------------
+function renderSyncBadge() {
+  if (syncStatus === 'live') return `<span class="sync-live"><span class="dot"></span>Live</span>`;
+  if (syncStatus === 'offline') return `<span class="sync-offline">Offline — will sync when back online</span>`;
+  if (syncStatus === 'error') return `<span class="sync-error">Connection problem</span>`;
+  return `<span class="sync-connecting">Connecting…</span>`;
+}
+function renderPlate(vehicleNo) {
+  return `<span class="plate-chip"><span class="plate-tab"></span><span class="plate-text">${escapeHtml(vehicleNo)}</span></span>`;
+}
+function renderStatusPill(status) {
+  const c = statusColors(status.level);
+  return `<span class="status-pill" style="background:${c.bg};border:1px solid ${c.border};color:${c.fg}">${escapeHtml(status.label)}</span>`;
+}
+function renderStatBlock(label, value, color, filterKey) {
+  const isActive = ui.filter === filterKey;
+  return `<button class="stat-block${isActive ? ' active' : ''}" style="border-top:3px solid ${color}${isActive ? `;border-color:${color}` : ''}" data-action="toggle-filter" data-filter="${filterKey}">
+    <div class="stat-num">${value}</div><div class="stat-label">${label}</div></button>`;
+}
+function renderTaxField(vehicle, id) {
+  const isLT = id in lifetimeOverride ? lifetimeOverride[id] : (vehicle ? vehicle.tax.isLifetime : false);
+  const dueDate = vehicle && !isLT ? vehicle.tax.dueDate : null;
+  const amount = vehicle && !isLT ? vehicle.tax.amount : null;
+  const note = vehicle && isLT ? vehicle.tax.lifetimeNote : '';
+  const status = isLT ? { level: 'lifetime', label: 'Lifetime' } : getComplianceStatus({ tax: { isLifetime:false, dueDate: dueDate } }, 'tax');
+  return `<div class="compliance-block">
+    <div class="compliance-head"><span class="compliance-label">RTO Tax</span>
+      <div style="display:flex;align-items:center;gap:6px">
+        ${!isLT && dueDate ? `<span class="compliance-date-hint">${formatDateDisplay(dueDate)}</span>` : ''}
+        ${renderStatusPill(status)}
+      </div>
+    </div>
+    <label class="checkbox-row"><input type="checkbox" id="f_${id}_tax_lifetime" data-lifetime-checkbox data-id="${id}" ${isLT ? 'checked' : ''}/> Lifetime tax (LTT) — no quarterly renewal</label>
+    ${isLT
+      ? `<input type="text" id="f_${id}_tax_note" class="text-input" placeholder="e.g. Paid till ~2035 re-registration" value="${escapeHtml(note || '')}"/>`
+      : `<div class="row-fields">
+           <input type="date" id="f_${id}_tax_date" class="date-input" value="${dueDate || ''}"/>
+           <input type="number" min="0" id="f_${id}_tax_amount" class="number-input" placeholder="Amount ₹" value="${amount ?? ''}"/>
+           <button type="button" class="quick-btn" data-action="quick-renew" data-id="${id}" data-field="tax" data-months="3">↻ +3 mo</button>
+         </div>`
+    }
+  </div>`;
+}
+function renderSimpleField(vehicle, id, typeKey, label, quickMonths, quickLabel) {
+  const data = (vehicle && vehicle[typeKey]) || { dueDate: null, amount: null };
+  const status = getComplianceStatus({ [typeKey]: data }, typeKey);
+  return `<div class="compliance-block">
+    <div class="compliance-head"><span class="compliance-label">${label}</span>
+      <div style="display:flex;align-items:center;gap:6px">
+        ${data.dueDate ? `<span class="compliance-date-hint">${formatDateDisplay(data.dueDate)}</span>` : ''}
+        ${renderStatusPill(status)}
+      </div>
+    </div>
+    <div class="row-fields">
+      <input type="date" id="f_${id}_${typeKey}_date" class="date-input" value="${data.dueDate || ''}"/>
+      <input type="number" min="0" id="f_${id}_${typeKey}_amount" class="number-input" placeholder="Amount ₹ (optional)" value="${data.amount ?? ''}"/>
+      ${quickMonths ? `<button type="button" class="quick-btn" data-action="quick-renew" data-id="${id}" data-field="${typeKey}" data-months="${quickMonths}">↻ ${quickLabel}</button>` : ''}
+    </div>
+  </div>`;
+}
+function renderVehicleRow(v) {
+  const isExpanded = ui.expanded.has(v.id);
+  const worst = getVehicleWorstStatus(v);
+  const wc = statusColors(worst.level);
+  const dots = COMPLIANCE_TYPES.map(({ key, short, label }) => {
+    const s = getComplianceStatus(v, key);
+    const c = statusColors(s.level);
+    return `<span class="status-dot" title="${escapeHtml(label)}: ${escapeHtml(s.label)}" style="background:${c.bg};border:1px solid ${c.border};color:${c.fg}">${short[0]}</span>`;
+  }).join('');
+
+  let expandHtml = '';
+  if (isExpanded) {
+    const confirming = !!ui.confirmDelete[v.id];
+    expandHtml = `<div class="expand-body">
+      <div class="field-grid">
+        <div class="field"><label>Vehicle number<input class="text-input" id="f_${v.id}_vehicleNo" value="${escapeHtml(v.vehicleNo)}"/></label></div>
+        <div class="field"><label>Chassis number<input class="text-input" id="f_${v.id}_chassisNo" value="${escapeHtml(v.chassisNo || '')}"/></label></div>
+      </div>
+      ${renderTaxField(v, v.id)}
+      ${renderSimpleField(v, v.id, 'insurance', 'Insurance', 12, '+1 yr')}
+      ${renderSimpleField(v, v.id, 'fitness', 'Fitness Certificate', null, null)}
+      ${renderSimpleField(v, v.id, 'puc', 'PUC Certificate', 6, '+6 mo')}
+      <div class="field"><label>Notes<input class="text-input" id="f_${v.id}_notes" value="${escapeHtml(v.notes || '')}" placeholder="Driver, route, or any note"/></label></div>
+      <div class="actions-row">
+        <div class="actions-left">
+          ${confirming
+            ? `<span class="error-text">Delete for good?</span>
+               <button class="btn btn-danger-filled" data-action="delete-confirm" data-id="${v.id}">Yes, delete</button>
+               <button class="btn btn-outline" data-action="delete-cancel" data-id="${v.id}">Cancel</button>`
+            : `<button class="btn btn-danger-text" data-action="delete-request" data-id="${v.id}">🗑 Delete</button>
+               <button class="btn btn-outline" data-action="archive-toggle" data-id="${v.id}">${v.active ? '📦 Archive' : '↻ Restore'}</button>`
+          }
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          ${ui.justSaved[v.id] ? `<span class="saved-flash">Saved</span>` : ''}
+          <button class="btn btn-primary" data-action="save-vehicle" data-id="${v.id}">✓ Save changes</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  return `<div class="vehicle-row${isExpanded ? ' expanded' : ''}${!v.active ? ' inactive' : ''}">
+    <button class="row-summary" data-action="toggle-expand" data-id="${v.id}">
+      ${renderPlate(v.vehicleNo)}
+      <div class="row-mid">
+        ${v.active
+          ? `<div class="row-status" style="color:${wc.fg}">${worst.level === 'unset' ? 'No dates set yet' : `${escapeHtml(worst.typeLabel)} · ${escapeHtml(worst.label)}`}</div>`
+          : `<div class="row-status" style="color:#8A93A3">Archived${v.notes ? ` · ${escapeHtml(v.notes)}` : ''}</div>`
+        }
+        ${v.chassisNo ? `<div class="row-chassis">Chassis ${escapeHtml(v.chassisNo)}</div>` : ''}
+      </div>
+      <div class="status-dots">${dots}</div>
+      <svg class="chevron${isExpanded ? ' open' : ''}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    ${expandHtml}
+  </div>`;
+}
+function renderAddForm() {
+  if (!ui.addOpen) return `<button class="btn btn-outline add-toggle-btn" data-action="toggle-add">+ Add vehicle</button>`;
+  return `<div class="add-form">
+    <div class="add-form-title">Add a vehicle</div>
+    <div class="field-grid">
+      <div class="field"><label>Vehicle number *<input class="text-input" id="f_new_vehicleNo" placeholder="CG16XX1234"/></label></div>
+      <div class="field"><label>Chassis number<input class="text-input" id="f_new_chassisNo"/></label></div>
+    </div>
+    ${renderTaxField(null, 'new')}
+    ${renderSimpleField(null, 'new', 'insurance', 'Insurance', 12, '+1 yr')}
+    ${renderSimpleField(null, 'new', 'fitness', 'Fitness Certificate', null, null)}
+    ${renderSimpleField(null, 'new', 'puc', 'PUC Certificate', 6, '+6 mo')}
+    <div class="field"><label>Notes<input class="text-input" id="f_new_notes" placeholder="Driver, route, or any note"/></label></div>
+    ${ui.addError ? `<div class="error-text">${escapeHtml(ui.addError)}</div>` : ''}
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn btn-outline" data-action="toggle-add">Cancel</button>
+      <button class="btn btn-primary" data-action="add-submit">+ Add vehicle</button>
+    </div>
+  </div>`;
+}
+function renderApp() {
+  const activeVehicles = vehicles.filter(v => v.active);
+  const archivedVehicles = vehicles.filter(v => !v.active);
+  const overdueCount = activeVehicles.filter(v => getVehicleWorstStatus(v).level === 'overdue').length;
+  const soonCount = activeVehicles.filter(v => getVehicleWorstStatus(v).level === 'soon').length;
+  const missingCount = activeVehicles.filter(v => COMPLIANCE_TYPES.some(({key}) => getComplianceStatus(v,key).level === 'unset')).length;
+
+  const pool = ui.filter === 'archived' ? archivedVehicles : activeVehicles;
+  const filtered = pool.filter(v => {
+    if (ui.filter === 'overdue' && getVehicleWorstStatus(v).level !== 'overdue') return false;
+    if (ui.filter === 'soon' && getVehicleWorstStatus(v).level !== 'soon') return false;
+    if (ui.filter === 'missing' && !COMPLIANCE_TYPES.some(({key}) => getComplianceStatus(v,key).level === 'unset')) return false;
+    if (ui.search.trim()) {
+      const q = ui.search.trim().toLowerCase();
+      if (!v.vehicleNo.toLowerCase().includes(q) && !(v.chassisNo||'').toLowerCase().includes(q)) return false;
+    }
+    return true;
+  }).sort((a,b) => {
+    const wa = getVehicleWorstStatus(a), wb = getVehicleWorstStatus(b);
+    if (STATUS_RANK[wa.level] !== STATUS_RANK[wb.level]) return STATUS_RANK[wa.level]-STATUS_RANK[wb.level];
+    return (wa.days ?? Infinity) - (wb.days ?? Infinity);
+  });
+
+  return `<div class="wrap">
+    <header>
+      <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1>${renderSyncBadge()}</div>
+      <p class="subtitle">${activeVehicles.length} active · ${archivedVehicles.length} archived · shared live with everyone who opens this app</p>
+    </header>
+    <div class="stat-grid">
+      ${renderStatBlock('Overdue', overdueCount, '#E5484D', 'overdue')}
+      ${renderStatBlock('Due ≤ 30 days', soonCount, '#F2A93B', 'soon')}
+      ${renderStatBlock('Needs info', missingCount, '#5B9FE3', 'missing')}
+      ${renderStatBlock('Archived', archivedVehicles.length, '#5B6472', 'archived')}
+    </div>
+    <div class="search-wrap">
+      <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="search-input" class="text-input" placeholder="Search by vehicle or chassis number" value="${escapeHtml(ui.search)}"/>
+    </div>
+    <div class="vehicle-list">
+      ${filtered.length === 0 ? `<div class="empty-state">${emptyStateMessage(ui.filter, ui.search)}</div>` : filtered.map(renderVehicleRow).join('')}
+    </div>
+    <div style="margin-top:14px">${renderAddForm()}</div>
+    <div class="backup-note">
+      <span>Want a local safety-net copy?</span>
+      <button class="btn btn-outline" data-action="export-backup">⬇ Export backup</button>
+    </div>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-dot" style="background:#E5484D"></span>Overdue</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#F2A93B"></span>Due ≤ 30d</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#5B9FE3"></span>Due ≤ 90d</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#3FB27F"></span>On track / Lifetime</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#5B6472"></span>Not set</span>
+    </div>
+  </div>`;
+}
+
+// ---------------- init ----------------
+(async () => {
+  try {
+    await ensureSeeded();
+  } catch (e) {
+    console.error('Seeding failed — check your Firebase config and Firestore rules.', e);
+  }
+  subscribe();
+})();
+</script>
+</body>
+</html>
