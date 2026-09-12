@@ -107,10 +107,19 @@ const firebaseConfig = {
   appId: "1:509479364229:web:28e7e64fd238b9d0a62bec"
 };
 
+// =====================================================================
+// PASTE YOUR CLOUDINARY DETAILS HERE (free, no card — see setup steps in chat).
+// Used for document/receipt uploads instead of Firebase Storage.
+// =====================================================================
+const CLOUDINARY_CLOUD_NAME = "wwya7yaf";
+const CLOUDINARY_UPLOAD_PRESET = "Fleet_receipts";
+
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
 const vehiclesCol = collection(db, 'vehicles');
 try { await enableIndexedDbPersistence(db); } catch (e) { /* multiple tabs open, or unsupported — non-fatal */ }
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB per file
+
 
 const COMPLIANCE_TYPES = [
   { key: 'tax', label: 'RTO Tax', short: 'Tax' },
@@ -276,12 +285,13 @@ window.addEventListener('offline', () => { syncStatus = 'offline'; render(); });
 
 // ---------------- form reading helpers ----------------
 function readVehicleFormFromDOM(id) {
-  const existing = vehicles.find(v => v.id === id) || { id, active: true };
+  const existing = vehicles.find(v => v.id === id) || { id, active: true, documents: [] };
   const g = (f) => document.getElementById(`f_${id}_${f}`);
   const isLT = g('tax_lifetime').checked;
   return {
     id: existing.id,
     active: existing.active,
+    documents: existing.documents || [],
     vehicleNo: g('vehicleNo').value.trim().toUpperCase(),
     chassisNo: g('chassisNo').value.trim(),
     notes: g('notes').value.trim(),
@@ -321,10 +331,60 @@ async function submitAddForm() {
   ui.addOpen = false; ui.addError = ''; delete lifetimeOverride['new'];
   render();
 }
-function quickRenew(id, field, months) {
+const uploadingFor = {}; // vehicleId -> true while an upload is in flight
+const uploadError = {}; // vehicleId -> error message
+
+async function handleUploadDocument(vehicleId, file) {
+  if (!file) return;
+  if (file.size > MAX_UPLOAD_BYTES) {
+    uploadError[vehicleId] = `"${file.name}" is over 10MB — compress it or take a lighter-quality photo.`;
+    render();
+    return;
+  }
+  uploadingFor[vehicleId] = true;
+  uploadError[vehicleId] = '';
+  render();
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!res.ok) throw new Error('Cloudinary upload failed: ' + res.status);
+    const data = await res.json();
+    const v = vehicles.find(x => x.id === vehicleId);
+    const docs = (v.documents || []).concat([{
+      name: file.name, url: data.secure_url, path: data.public_id, uploadedAt: new Date().toISOString(),
+    }]);
+    await saveVehicleRemote({ ...v, documents: docs });
+  } catch (e) {
+    uploadError[vehicleId] = 'Upload failed — check your connection and Cloudinary settings, then try again.';
+  } finally {
+    uploadingFor[vehicleId] = false;
+    render();
+  }
+}
+async function handleDeleteDocument(vehicleId, path) {
+  // Unsigned uploads can't be deleted from Cloudinary client-side (needs a signed request).
+  // This removes it from the app's list; the file itself stays in your free Cloudinary storage, unused.
+  const v = vehicles.find(x => x.id === vehicleId);
+  if (!v) return;
+  const docs = (v.documents || []).filter(d => d.path !== path);
+  await saveVehicleRemote({ ...v, documents: docs });
+}
+
+function quickRenew(id, field, months, btnEl) {
   const dateInput = document.getElementById(`f_${id}_${field}_date`);
   if (!dateInput) return;
   dateInput.value = addMonthsClampEOM(dateInput.value || todayStr(), months);
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.style.opacity = '0.45';
+    btnEl.style.cursor = 'not-allowed';
+    btnEl.textContent = '✓ Applied — save to confirm';
+  }
 }
 function exportBackup() {
   const json = JSON.stringify({ kind: 'fleet-compliance-backup', exportedAt: new Date().toISOString(), vehicles }, null, 2);
@@ -350,14 +410,21 @@ root.addEventListener('click', (e) => {
   else if (action === 'delete-request') { ui.confirmDelete[id] = true; render(); }
   else if (action === 'delete-cancel') { delete ui.confirmDelete[id]; render(); }
   else if (action === 'delete-confirm') { handleDeleteConfirmed(id); }
-  else if (action === 'quick-renew') { quickRenew(id, btn.dataset.field, Number(btn.dataset.months)); }
+  else if (action === 'quick-renew') { quickRenew(id, btn.dataset.field, Number(btn.dataset.months), btn); }
   else if (action === 'add-submit') { submitAddForm(); }
   else if (action === 'export-backup') { exportBackup(); }
+  else if (action === 'upload-trigger') { const inp = document.getElementById(`f_${id}_doc_input`); if (inp) inp.click(); }
+  else if (action === 'delete-document') { handleDeleteDocument(id, btn.dataset.path); }
 });
 root.addEventListener('change', (e) => {
   if (e.target.matches('[data-lifetime-checkbox]')) {
     lifetimeOverride[e.target.dataset.id] = e.target.checked;
     render();
+  }
+  if (e.target.matches('[data-doc-input]')) {
+    const file = e.target.files && e.target.files[0];
+    handleUploadDocument(e.target.dataset.id, file);
+    e.target.value = '';
   }
 });
 root.addEventListener('input', (e) => {
@@ -424,6 +491,28 @@ function renderSimpleField(vehicle, id, typeKey, label, quickMonths, quickLabel)
     </div>
   </div>`;
 }
+function renderDocuments(v) {
+  const docs = v.documents || [];
+  const isUploading = !!uploadingFor[v.id];
+  const err = uploadError[v.id];
+  const list = docs.length === 0
+    ? `<div style="font-size:11.5px;color:#5B6472">No documents yet — receipts, insurance copies, RC, etc.</div>`
+    : `<div style="display:flex;flex-direction:column;gap:6px">${docs.map(d => `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:#12161C;border:1px solid #262E39;border-radius:6px;padding:6px 9px">
+          <a href="${escapeHtml(d.url)}" target="_blank" rel="noopener" style="color:#5B9FE3;font-size:12px;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${escapeHtml(d.name)}</a>
+          <span style="font-size:10px;color:#5B6472;flex-shrink:0">${formatDateDisplay(d.uploadedAt.slice(0,10)) || ''}</span>
+          <button class="btn btn-danger-text" style="padding:3px 7px;font-size:11px" data-action="delete-document" data-id="${v.id}" data-path="${escapeHtml(d.path)}">🗑</button>
+        </div>`).join('')}</div>`;
+  return `<div class="compliance-block">
+    <div class="compliance-head"><span class="compliance-label">Documents — receipts, insurance copy, RC</span></div>
+    ${list}
+    <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn btn-outline" data-action="upload-trigger" data-id="${v.id}" ${isUploading ? 'disabled' : ''}>${isUploading ? 'Uploading…' : '⬆ Upload document'}</button>
+      <input type="file" id="f_${v.id}_doc_input" data-doc-input data-id="${v.id}" accept="image/*,application/pdf" style="display:none"/>
+    </div>
+    ${err ? `<div class="error-text" style="margin-top:6px">${escapeHtml(err)}</div>` : ''}
+  </div>`;
+}
 function renderVehicleRow(v) {
   const isExpanded = ui.expanded.has(v.id);
   const worst = getVehicleWorstStatus(v);
@@ -446,6 +535,7 @@ function renderVehicleRow(v) {
       ${renderSimpleField(v, v.id, 'insurance', 'Insurance', 12, '+1 yr')}
       ${renderSimpleField(v, v.id, 'fitness', 'Fitness Certificate', null, null)}
       ${renderSimpleField(v, v.id, 'puc', 'PUC Certificate', 6, '+6 mo')}
+      ${renderDocuments(v)}
       <div class="field"><label>Notes<input class="text-input" id="f_${v.id}_notes" value="${escapeHtml(v.notes || '')}" placeholder="Driver, route, or any note"/></label></div>
       <div class="actions-row">
         <div class="actions-left">
