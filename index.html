@@ -430,6 +430,7 @@ root.addEventListener('click', (e) => {
   else if (action === 'export-backup') { exportBackup(); }
   else if (action === 'upload-trigger') { const inp = document.getElementById(`f_${id}_doc_input`); if (inp) inp.click(); }
   else if (action === 'delete-document') { handleDeleteDocument(id, btn.dataset.path); }
+  else if (action === 'download-document') { handleDownloadDocument(btn.dataset.url, btn.dataset.name, btn); }
 });
 root.addEventListener('change', (e) => {
   if (e.target.matches('[data-lifetime-checkbox]')) {
@@ -506,8 +507,27 @@ function renderSimpleField(vehicle, id, typeKey, label, quickMonths, quickLabel)
     </div>
   </div>`;
 }
-function toDownloadUrl(url) {
-  return url.includes('/upload/') ? url.replace('/upload/', '/upload/fl_attachment/') : url;
+async function handleDownloadDocument(url, name, btnEl) {
+  const originalText = btnEl ? btnEl.textContent : '';
+  if (btnEl) btnEl.textContent = '⬇ Downloading…';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('fetch failed');
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = name || 'document';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+  } catch (e) {
+    // Fallback: open it directly if the fetch/blob approach fails for any reason
+    window.open(url, '_blank');
+  } finally {
+    if (btnEl) btnEl.textContent = originalText;
+  }
 }
 function renderDocuments(v) {
   const docs = v.documents || [];
@@ -517,7 +537,7 @@ function renderDocuments(v) {
     ? `<div style="font-size:11.5px;color:#5B6472">No documents yet — receipts, insurance copies, RC, etc.</div>`
     : `<div style="display:flex;flex-direction:column;gap:6px">${docs.map(d => `
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:#12161C;border:1px solid #262E39;border-radius:6px;padding:6px 9px">
-          <a href="${escapeHtml(toDownloadUrl(d.url))}" target="_blank" rel="noopener" style="color:#5B9FE3;font-size:12px;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">⬇ ${escapeHtml(d.name)}</a>
+          <button type="button" data-action="download-document" data-url="${escapeHtml(d.url)}" data-name="${escapeHtml(d.name)}" style="background:none;border:none;color:#5B9FE3;font-size:12px;cursor:pointer;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;padding:0;font-family:inherit">⬇ ${escapeHtml(d.name)}</button>
           <span style="font-size:10px;color:#5B6472;flex-shrink:0">${formatDateDisplay(d.uploadedAt.slice(0,10)) || ''}</span>
           <button class="btn btn-danger-text" style="padding:3px 7px;font-size:11px" data-action="delete-document" data-id="${v.id}" data-path="${escapeHtml(d.path)}">🗑</button>
         </div>`).join('')}</div>`;
