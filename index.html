@@ -378,13 +378,27 @@ async function handleDeleteDocument(vehicleId, path) {
 function quickRenew(id, field, months, btnEl) {
   const dateInput = document.getElementById(`f_${id}_${field}_date`);
   if (!dateInput) return;
+  const previousValue = dateInput.value;
   dateInput.value = addMonthsClampEOM(dateInput.value || todayStr(), months);
   if (btnEl) {
-    btnEl.disabled = true;
-    btnEl.style.opacity = '0.45';
-    btnEl.style.cursor = 'not-allowed';
-    btnEl.textContent = '✓ Applied — save to confirm';
+    btnEl.dataset.prevValue = previousValue;
+    btnEl.dataset.action = 'undo-quick-renew';
+    btnEl.textContent = '↩ Undo';
+    btnEl.style.borderStyle = 'solid';
+    btnEl.style.color = '#F2A93B';
+    btnEl.style.borderColor = '#F2A93B';
   }
+}
+function undoQuickRenew(id, field, months, quickLabel, btnEl) {
+  const dateInput = document.getElementById(`f_${id}_${field}_date`);
+  if (!dateInput || !btnEl) return;
+  dateInput.value = btnEl.dataset.prevValue || '';
+  delete btnEl.dataset.prevValue;
+  btnEl.dataset.action = 'quick-renew';
+  btnEl.textContent = `↻ ${quickLabel}`;
+  btnEl.style.borderStyle = 'dashed';
+  btnEl.style.color = '#8A93A3';
+  btnEl.style.borderColor = '#3A4553';
 }
 function exportBackup() {
   const json = JSON.stringify({ kind: 'fleet-compliance-backup', exportedAt: new Date().toISOString(), vehicles }, null, 2);
@@ -411,6 +425,7 @@ root.addEventListener('click', (e) => {
   else if (action === 'delete-cancel') { delete ui.confirmDelete[id]; render(); }
   else if (action === 'delete-confirm') { handleDeleteConfirmed(id); }
   else if (action === 'quick-renew') { quickRenew(id, btn.dataset.field, Number(btn.dataset.months), btn); }
+  else if (action === 'undo-quick-renew') { undoQuickRenew(id, btn.dataset.field, Number(btn.dataset.months), btn.dataset.label, btn); }
   else if (action === 'add-submit') { submitAddForm(); }
   else if (action === 'export-backup') { exportBackup(); }
   else if (action === 'upload-trigger') { const inp = document.getElementById(`f_${id}_doc_input`); if (inp) inp.click(); }
@@ -469,7 +484,7 @@ function renderTaxField(vehicle, id) {
       : `<div class="row-fields">
            <input type="date" id="f_${id}_tax_date" class="date-input" value="${dueDate || ''}"/>
            <input type="number" min="0" id="f_${id}_tax_amount" class="number-input" placeholder="Amount ₹" value="${amount ?? ''}"/>
-           <button type="button" class="quick-btn" data-action="quick-renew" data-id="${id}" data-field="tax" data-months="3">↻ +3 mo</button>
+           <button type="button" class="quick-btn" data-action="quick-renew" data-id="${id}" data-field="tax" data-months="3" data-label="+3 mo">↻ +3 mo</button>
          </div>`
     }
   </div>`;
@@ -487,9 +502,12 @@ function renderSimpleField(vehicle, id, typeKey, label, quickMonths, quickLabel)
     <div class="row-fields">
       <input type="date" id="f_${id}_${typeKey}_date" class="date-input" value="${data.dueDate || ''}"/>
       <input type="number" min="0" id="f_${id}_${typeKey}_amount" class="number-input" placeholder="Amount ₹ (optional)" value="${data.amount ?? ''}"/>
-      ${quickMonths ? `<button type="button" class="quick-btn" data-action="quick-renew" data-id="${id}" data-field="${typeKey}" data-months="${quickMonths}">↻ ${quickLabel}</button>` : ''}
+      ${quickMonths ? `<button type="button" class="quick-btn" data-action="quick-renew" data-id="${id}" data-field="${typeKey}" data-months="${quickMonths}" data-label="${quickLabel}">↻ ${quickLabel}</button>` : ''}
     </div>
   </div>`;
+}
+function toDownloadUrl(url) {
+  return url.includes('/upload/') ? url.replace('/upload/', '/upload/fl_attachment/') : url;
 }
 function renderDocuments(v) {
   const docs = v.documents || [];
@@ -499,7 +517,7 @@ function renderDocuments(v) {
     ? `<div style="font-size:11.5px;color:#5B6472">No documents yet — receipts, insurance copies, RC, etc.</div>`
     : `<div style="display:flex;flex-direction:column;gap:6px">${docs.map(d => `
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:#12161C;border:1px solid #262E39;border-radius:6px;padding:6px 9px">
-          <a href="${escapeHtml(d.url)}" target="_blank" rel="noopener" style="color:#5B9FE3;font-size:12px;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${escapeHtml(d.name)}</a>
+          <a href="${escapeHtml(toDownloadUrl(d.url))}" target="_blank" rel="noopener" style="color:#5B9FE3;font-size:12px;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">⬇ ${escapeHtml(d.name)}</a>
           <span style="font-size:10px;color:#5B6472;flex-shrink:0">${formatDateDisplay(d.uploadedAt.slice(0,10)) || ''}</span>
           <button class="btn btn-danger-text" style="padding:3px 7px;font-size:11px" data-action="delete-document" data-id="${v.id}" data-path="${escapeHtml(d.path)}">🗑</button>
         </div>`).join('')}</div>`;
