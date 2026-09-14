@@ -494,6 +494,18 @@ async function handleDeleteDocument(vehicleId, path) {
   await saveVehicleRemote({ ...v, documents: docs });
 }
 
+async function handlePayDue(vehicleNo, btnEl) {
+  const originalText = btnEl ? btnEl.textContent : '';
+  try {
+    await navigator.clipboard.writeText(vehicleNo);
+    if (btnEl) btnEl.textContent = '✓ Number copied — opening VAHAN…';
+  } catch (e) {
+    if (btnEl) btnEl.textContent = `Copy failed — number is ${vehicleNo}`;
+  }
+  haptic(15);
+  window.open('https://vahan.parivahan.gov.in/vahanservice/vahan/', '_blank', 'noopener');
+  if (btnEl) setTimeout(() => { btnEl.textContent = originalText; }, 3000);
+}
 function quickRenew(id, field, months, btnEl) {
   const dateInput = document.getElementById(`f_${id}_${field}_date`);
   if (!dateInput) return;
@@ -551,6 +563,7 @@ root.addEventListener('click', (e) => {
   else if (action === 'delete-forever') { handlePermanentDelete(id); }
   else if (action === 'open-spend') { navigateTo('spend'); }
   else if (action === 'share-dues') { handleShareDues(); }
+  else if (action === 'pay-due') { handlePayDue(btn.dataset.vehicleNo, btn); }
   else if (action === 'quick-renew') { quickRenew(id, btn.dataset.field, Number(btn.dataset.months), btn); }
   else if (action === 'undo-quick-renew') { undoQuickRenew(id, btn.dataset.field, Number(btn.dataset.months), btn.dataset.label, btn); }
   else if (action === 'add-submit') { submitAddForm(); }
@@ -616,6 +629,7 @@ function renderTaxField(vehicle, id) {
            <input type="date" id="f_${id}_tax_date" class="date-input" value="${dueDate || ''}"/>
            <input type="number" min="0" id="f_${id}_tax_amount" class="number-input" placeholder="Amount ₹" value="${amount ?? ''}"/>
            <button type="button" class="quick-btn" data-action="quick-renew" data-id="${id}" data-field="tax" data-months="3" data-label="+3 mo">↻ +3 mo</button>
+           ${vehicle ? `<button type="button" class="btn btn-primary" data-action="pay-due" data-vehicle-no="${escapeHtml(vehicle.vehicleNo)}">🔗 Pay on VAHAN</button>` : ''}
          </div>`
     }
   </div>`;
