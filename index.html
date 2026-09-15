@@ -130,6 +130,7 @@
   .spend-row { display: flex; justify-content: space-between; padding: 11px 14px; font-size: 13px; border-bottom: 1px solid #232B37; font-family: 'JetBrains Mono', monospace; }
   .spend-row:last-child { border-bottom: none; }
   .spend-note { font-size: 11.5px; color: #5B6472; margin-top: 16px; line-height: 1.5; }
+  .foreground-notice { background: rgba(91,159,227,0.14); border: 1px solid rgba(91,159,227,0.35); color: #5B9FE3; border-radius: 7px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; animation: fadeSlide 0.2s ease-out; }
 
   @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
 </style>
@@ -143,6 +144,9 @@ import {
   getFirestore, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot,
   enableIndexedDbPersistence
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import {
+  getMessaging, getToken, onMessage, isSupported as isMessagingSupported
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-messaging.js";
 
 // =====================================================================
 // PASTE YOUR OWN FIREBASE CONFIG HERE (see setup steps in chat).
@@ -164,11 +168,39 @@ const firebaseConfig = {
 const CLOUDINARY_CLOUD_NAME = "wwya7yaf";
 const CLOUDINARY_UPLOAD_PRESET = "Fleet_receipts";
 
+// =====================================================================
+// PASTE YOUR FCM VAPID KEY HERE (Project settings -> Cloud Messaging -> Web
+// configuration -> Generate key pair). Needed for push notifications.
+// =====================================================================
+const FCM_VAPID_KEY = "BP10xpUHVY2jfJPry0JxdlTyt29R7WdKyRnEDZY1qZUBz4zHbPHFl_gLzDsPI5lVjGEQa_0-4LQcMQRLqNdHOz4";
+
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
 const vehiclesCol = collection(db, 'vehicles');
+const deviceTokensCol = collection(db, 'deviceTokens');
 try { await enableIndexedDbPersistence(db); } catch (e) { /* multiple tabs open, or unsupported — non-fatal */ }
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB per file
+
+let messaging = null;
+let notifStatus = 'checking'; // checking | default | granted | denied | unsupported
+let foregroundNotice = '';
+(async () => {
+  try {
+    const supported = await isMessagingSupported();
+    if (!supported || !('Notification' in window)) { notifStatus = 'unsupported'; render(); return; }
+    messaging = getMessaging(fbApp);
+    notifStatus = Notification.permission; // 'default' | 'granted' | 'denied'
+    onMessage(messaging, (payload) => {
+      foregroundNotice = (payload.notification && payload.notification.body) || 'A vehicle needs attention.';
+      render();
+      setTimeout(() => { foregroundNotice = ''; render(); }, 7000);
+    });
+    render();
+  } catch (e) {
+    notifStatus = 'unsupported';
+    render();
+  }
+})();
 
 
 const COMPLIANCE_TYPES = [
@@ -574,6 +606,7 @@ root.addEventListener('click', (e) => {
   else if (action === 'delete-forever') { handlePermanentDelete(id); }
   else if (action === 'open-spend') { navigateTo('spend'); }
   else if (action === 'share-dues') { handleShareDues(); }
+  else if (action === 'enable-notifications') { handleEnableNotifications(); }
   else if (action === 'pay-due') { handlePayDue(btn.dataset.vehicleNo, btn); }
   else if (action === 'copy-chassis') { handleCopyChassis(btn.dataset.chassis, btn); }
   else if (action === 'quick-renew') { quickRenew(id, btn.dataset.field, Number(btn.dataset.months), btn); }
@@ -918,6 +951,25 @@ function generateWeeklyDuesText() {
   if (!overdueLines.length && !dueLines.length) body += `\n✅ Nothing overdue or due within 7 days. All clear!\n`;
   return body;
 }
+async function handleEnableNotifications() {
+  if (!messaging) { notifStatus = 'unsupported'; render(); return; }
+  try {
+    const permission = await Notification.requestPermission();
+    notifStatus = permission;
+    render();
+    if (permission === 'granted') {
+      const registration = await navigator.serviceWorker.register('firebase-messaging-sw.js');
+      const token = await getToken(messaging, { vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: registration });
+      if (token) {
+        await setDoc(doc(deviceTokensCol, token), { token, registeredAt: new Date().toISOString() });
+        haptic(20);
+      }
+    }
+  } catch (e) {
+    console.error('Notification setup failed:', e);
+  }
+  render();
+}
 async function handleShareDues() {
   const text = generateWeeklyDuesText();
   haptic(15);
@@ -932,6 +984,12 @@ async function handleShareDues() {
   }
   render();
   if (shareState.mode === 'copied') setTimeout(() => { shareState.text = ''; shareState.mode = ''; render(); }, 4000);
+}
+function renderNotifButton() {
+  if (notifStatus === 'unsupported' || notifStatus === 'checking') return '';
+  if (notifStatus === 'granted') return `<button type="button" class="btn btn-outline quick-action-btn" disabled style="opacity:0.6">🔔 Notifications on</button>`;
+  if (notifStatus === 'denied') return `<button type="button" class="btn btn-outline quick-action-btn" disabled style="opacity:0.6">🔕 Blocked — check phone settings</button>`;
+  return `<button type="button" class="btn btn-primary quick-action-btn" data-action="enable-notifications">🔔 Enable Notifications</button>`;
 }
 function renderShareFallback() {
   const label = shareState.mode === 'copied' ? '✓ Copied to clipboard — paste it into WhatsApp' : 'Copy this manually:';
@@ -999,7 +1057,9 @@ function renderApp() {
     <div class="quick-actions">
       <button type="button" class="btn btn-outline quick-action-btn" data-action="open-spend">💰 Annual Spend</button>
       <button type="button" class="btn btn-outline quick-action-btn" data-action="share-dues">📤 Share this week's dues</button>
+      ${renderNotifButton()}
     </div>
+    ${foregroundNotice ? `<div class="foreground-notice">🔔 ${escapeHtml(foregroundNotice)}</div>` : ''}
     ${shareState.text ? renderShareFallback() : ''}
     <div class="search-wrap">
       <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
