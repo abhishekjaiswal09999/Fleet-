@@ -1,9 +1,0 @@
-{
-  "name": "fleet-notify",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Daily compliance check + push notification sender, run by GitHub Actions.",
-  "dependencies": {
-    "firebase-admin": "^12.0.0"
-  }
-}
