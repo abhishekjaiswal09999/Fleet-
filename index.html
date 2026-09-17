@@ -183,6 +183,7 @@ const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB per file
 
 let messaging = null;
 let notifStatus = 'checking'; // checking | default | granted | denied | unsupported
+let notifError = '';
 let foregroundNotice = '';
 (async () => {
   try {
@@ -952,6 +953,7 @@ function generateWeeklyDuesText() {
   return body;
 }
 async function handleEnableNotifications() {
+  notifError = '';
   if (!messaging) { notifStatus = 'unsupported'; render(); return; }
   try {
     const permission = await Notification.requestPermission();
@@ -959,13 +961,17 @@ async function handleEnableNotifications() {
     render();
     if (permission === 'granted') {
       const registration = await navigator.serviceWorker.register('firebase-messaging-sw.js');
+      await navigator.serviceWorker.ready;
       const token = await getToken(messaging, { vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: registration });
       if (token) {
         await setDoc(doc(deviceTokensCol, token), { token, registeredAt: new Date().toISOString() });
         haptic(20);
+      } else {
+        notifError = 'No token came back from Firebase — permission was granted but registration didn\u2019t complete.';
       }
     }
   } catch (e) {
+    notifError = `${e.name || 'Error'}: ${e.message || String(e)}`;
     console.error('Notification setup failed:', e);
   }
   render();
@@ -987,9 +993,10 @@ async function handleShareDues() {
 }
 function renderNotifButton() {
   if (notifStatus === 'unsupported' || notifStatus === 'checking') return '';
-  if (notifStatus === 'granted') return `<button type="button" class="btn btn-outline quick-action-btn" disabled style="opacity:0.6">🔔 Notifications on</button>`;
+  if (notifStatus === 'granted' && !notifError) return `<button type="button" class="btn btn-outline quick-action-btn" disabled style="opacity:0.6">🔔 Notifications on</button>`;
   if (notifStatus === 'denied') return `<button type="button" class="btn btn-outline quick-action-btn" disabled style="opacity:0.6">🔕 Blocked — check phone settings</button>`;
-  return `<button type="button" class="btn btn-primary quick-action-btn" data-action="enable-notifications">🔔 Enable Notifications</button>`;
+  const label = notifStatus === 'granted' ? '🔔 Retry registration' : '🔔 Enable Notifications';
+  return `<button type="button" class="btn btn-primary quick-action-btn" data-action="enable-notifications">${label}</button>`;
 }
 function renderShareFallback() {
   const label = shareState.mode === 'copied' ? '✓ Copied to clipboard — paste it into WhatsApp' : 'Copy this manually:';
@@ -1059,6 +1066,7 @@ function renderApp() {
       <button type="button" class="btn btn-outline quick-action-btn" data-action="share-dues">📤 Share this week's dues</button>
       ${renderNotifButton()}
     </div>
+    ${notifError ? `<div class="error-text" style="margin-bottom:12px">🔔 ${escapeHtml(notifError)}</div>` : ''}
     ${foregroundNotice ? `<div class="foreground-notice">🔔 ${escapeHtml(foregroundNotice)}</div>` : ''}
     ${shareState.text ? renderShareFallback() : ''}
     <div class="search-wrap">
