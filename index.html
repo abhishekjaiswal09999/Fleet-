@@ -993,7 +993,7 @@ async function handleShareDues() {
 }
 function renderNotifButton() {
   if (notifStatus === 'unsupported' || notifStatus === 'checking') return '';
-  if (notifStatus === 'granted' && !notifError) return `<button type="button" class="btn btn-outline quick-action-btn" disabled style="opacity:0.6">🔔 Notifications on</button>`;
+  if (notifStatus === 'granted' && !notifError) return `<button type="button" class="btn btn-outline quick-action-btn" data-action="enable-notifications">🔔 Notifications on (tap to re-check)</button>`;
   if (notifStatus === 'denied') return `<button type="button" class="btn btn-outline quick-action-btn" disabled style="opacity:0.6">🔕 Blocked — check phone settings</button>`;
   const label = notifStatus === 'granted' ? '🔔 Retry registration' : '🔔 Enable Notifications';
   return `<button type="button" class="btn btn-primary quick-action-btn" data-action="enable-notifications">${label}</button>`;
