@@ -131,6 +131,9 @@
   .spend-row:last-child { border-bottom: none; }
   .spend-note { font-size: 11.5px; color: #5B6472; margin-top: 16px; line-height: 1.5; }
   .foreground-notice { background: rgba(91,159,227,0.14); border: 1px solid rgba(91,159,227,0.35); color: #5B9FE3; border-radius: 7px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; animation: fadeSlide 0.2s ease-out; }
+  .notif-debug { background: #161B22; border: 1px solid #262E39; border-radius: 7px; padding: 10px 12px; margin-bottom: 12px; font-size: 11.5px; color: #8A93A3; line-height: 1.6; }
+  .notif-debug-title { font-weight: 700; color: #C3CAD4; margin-bottom: 4px; }
+  .notif-success { background: rgba(63,178,127,0.14); border: 1px solid rgba(63,178,127,0.35); color: #3FB27F; border-radius: 7px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; }
 
   @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
 </style>
@@ -169,8 +172,8 @@ const CLOUDINARY_CLOUD_NAME = "wwya7yaf";
 const CLOUDINARY_UPLOAD_PRESET = "Fleet_receipts";
 
 // =====================================================================
-// PASTE YOUR FCM VAPID KEY HERE (Project settings -> Cloud Messaging -> Web
-// configuration -> Generate key pair). Needed for push notifications.
+// PASTE YOUR FCM VAPID KEY HERE (Project settings -> Cloud Messaging ->
+// Web configuration -> Generate key pair). Needed for push notifications.
 // =====================================================================
 const FCM_VAPID_KEY = "BP10xpUHVY2jfJPry0JxdlTyt29R7WdKyRnEDZY1qZUBz4zHbPHFl_gLzDsPI5lVjGEQa_0-4LQcMQRLqNdHOz4";
 
@@ -184,6 +187,8 @@ const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB per file
 let messaging = null;
 let notifStatus = 'checking'; // checking | default | granted | denied | unsupported
 let notifError = '';
+let notifSuccessMsg = '';
+let notifDebugLines = [];
 let foregroundNotice = '';
 (async () => {
   try {
@@ -954,23 +959,44 @@ function generateWeeklyDuesText() {
 }
 async function handleEnableNotifications() {
   notifError = '';
+  notifSuccessMsg = '';
+  notifDebugLines = [];
   if (!messaging) { notifStatus = 'unsupported'; render(); return; }
+  notifDebugLines.push('Requesting notification permission…');
+  render();
   try {
     const permission = await Notification.requestPermission();
     notifStatus = permission;
+    notifDebugLines.push(`Permission result: ${permission}`);
     render();
-    if (permission === 'granted') {
-      const registration = await navigator.serviceWorker.register('firebase-messaging-sw.js');
-      await navigator.serviceWorker.ready;
-      const token = await getToken(messaging, { vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: registration });
-      if (token) {
-        await setDoc(doc(deviceTokensCol, token), { token, registeredAt: new Date().toISOString() });
-        haptic(20);
-      } else {
-        notifError = 'No token came back from Firebase — permission was granted but registration didn\u2019t complete.';
-      }
+    if (permission !== 'granted') {
+      notifDebugLines.push(permission === 'denied'
+        ? 'Blocked — enable notifications for this app in your phone/browser settings, then retry.'
+        : 'Dismissed without choosing — tap the button again to retry.');
+      render();
+      return;
     }
+    notifDebugLines.push('Registering service worker (firebase-messaging-sw.js)…');
+    render();
+    const registration = await navigator.serviceWorker.register('firebase-messaging-sw.js');
+    await navigator.serviceWorker.ready;
+    notifDebugLines.push('Service worker ready. Requesting FCM token…');
+    render();
+    const token = await getToken(messaging, { vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: registration });
+    if (!token) {
+      notifDebugLines.push('No token returned by Firebase.');
+      notifError = 'No token came back from Firebase — permission was granted but registration didn\u2019t complete. Try closing and reopening the app, or reinstalling it from the browser menu.';
+      render();
+      return;
+    }
+    notifDebugLines.push(`Token received (…${token.slice(-10)}). Saving to Firestore…`);
+    render();
+    await setDoc(doc(deviceTokensCol, token), { token, registeredAt: new Date().toISOString() });
+    notifDebugLines.push('Saved to Firestore \u2713');
+    notifSuccessMsg = `This device is registered for push notifications (token ending …${token.slice(-10)}). It'll get today's alert the next time the daily check runs at 9am IST — or tap "Run workflow" on the GitHub Actions tab to test immediately.`;
+    haptic(20);
   } catch (e) {
+    notifDebugLines.push(`Error: ${e.name || 'Error'} — ${e.message || String(e)}`);
     notifError = `${e.name || 'Error'}: ${e.message || String(e)}`;
     console.error('Notification setup failed:', e);
   }
@@ -997,6 +1023,10 @@ function renderNotifButton() {
   if (notifStatus === 'denied') return `<button type="button" class="btn btn-outline quick-action-btn" disabled style="opacity:0.6">🔕 Blocked — check phone settings</button>`;
   const label = notifStatus === 'granted' ? '🔔 Retry registration' : '🔔 Enable Notifications';
   return `<button type="button" class="btn btn-primary quick-action-btn" data-action="enable-notifications">${label}</button>`;
+}
+function renderNotifDebug() {
+  if (!notifDebugLines.length) return '';
+  return `<div class="notif-debug"><div class="notif-debug-title">Notification setup log</div>${notifDebugLines.map(l => `<div>${escapeHtml(l)}</div>`).join('')}</div>`;
 }
 function renderShareFallback() {
   const label = shareState.mode === 'copied' ? '✓ Copied to clipboard — paste it into WhatsApp' : 'Copy this manually:';
@@ -1066,7 +1096,9 @@ function renderApp() {
       <button type="button" class="btn btn-outline quick-action-btn" data-action="share-dues">📤 Share this week's dues</button>
       ${renderNotifButton()}
     </div>
+    ${notifSuccessMsg ? `<div class="notif-success">🔔 ${escapeHtml(notifSuccessMsg)}</div>` : ''}
     ${notifError ? `<div class="error-text" style="margin-bottom:12px">🔔 ${escapeHtml(notifError)}</div>` : ''}
+    ${renderNotifDebug()}
     ${foregroundNotice ? `<div class="foreground-notice">🔔 ${escapeHtml(foregroundNotice)}</div>` : ''}
     ${shareState.text ? renderShareFallback() : ''}
     <div class="search-wrap">
