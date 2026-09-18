@@ -141,6 +141,10 @@
   .menu-item:not(:disabled):hover { background: #232B37; }
   .menu-item:disabled { color: #5B6472; cursor: default; opacity: 0.8; }
   .fix-log-btn { font-size: 11px; padding: 6px 8px; }
+  .filter-total-banner { background: #1B212B; border: 1px solid #2B3441; border-left: 3px solid #F2A93B; border-radius: 7px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; color: #C3CAD4; }
+  .filter-total-banner strong { font-family: 'JetBrains Mono', monospace; color: #F4C41E; font-size: 15px; }
+  .filter-total-banner.overdue { border-left-color: #E5484D; }
+  .filter-total-banner.overdue strong { color: #E5484D; }
 
   @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
 </style>
@@ -962,6 +966,25 @@ function computeAnnualSpend(year) {
   return { total, byType, perVehicle };
 }
 function formatINR(n) { return '₹' + Math.round(n).toLocaleString('en-IN'); }
+function computeStatusTotal(level) {
+  let total = 0;
+  let count = 0;
+  for (const v of vehicles.filter(x => x.active && !x.deletedAt)) {
+    for (const { key } of COMPLIANCE_TYPES) {
+      const s = getComplianceStatus(v, key);
+      if (s.level !== level) continue;
+      const amt = v[key] && v[key].amount;
+      if (amt != null) { total += amt; count++; }
+    }
+  }
+  return { total, count };
+}
+function renderFilterTotalBanner(level) {
+  const { total, count } = computeStatusTotal(level);
+  if (count === 0) return '';
+  const label = level === 'overdue' ? 'Overdue' : 'Due within 30 days';
+  return `<div class="filter-total-banner${level === 'overdue' ? ' overdue' : ''}">💰 ${label}: <strong>${formatINR(total)}</strong> across ${count} item${count === 1 ? '' : 's'}</div>`;
+}
 function renderSpendScreen() {
   const year = new Date().getFullYear();
   const { total, byType, perVehicle } = computeAnnualSpend(year);
@@ -1160,6 +1183,7 @@ function renderApp() {
       <input id="search-input" class="text-input" placeholder="Search by vehicle or chassis number" value="${escapeHtml(ui.search)}"/>
     </div>
     <div class="vehicle-list">
+      ${(ui.filter === 'overdue' || ui.filter === 'soon') ? renderFilterTotalBanner(ui.filter) : ''}
       ${filtered.length === 0 ? `<div class="empty-state">${emptyStateMessage(ui.filter, ui.search)}</div>` : filtered.map(renderVehicleRow).join('')}
     </div>
     <div style="margin-top:14px">${renderAddForm()}</div>
