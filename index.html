@@ -145,6 +145,9 @@
   .filter-total-banner strong { font-family: 'JetBrains Mono', monospace; color: #F4C41E; font-size: 15px; }
   .filter-total-banner.overdue { border-left-color: #E5484D; }
   .filter-total-banner.overdue strong { color: #E5484D; }
+  .pending-upload { background: #161B22; border: 1px dashed #3A4553; border-radius: 8px; padding: 10px; margin-top: 10px; }
+  .pending-upload-label { font-size: 11.5px; color: #8A93A3; margin-bottom: 6px; }
+  .pending-upload-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 
   @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
 </style>
@@ -520,8 +523,38 @@ async function submitAddForm() {
 }
 const uploadingFor = {}; // vehicleId -> true while an upload is in flight
 const uploadError = {}; // vehicleId -> error message
+const pendingUpload = {}; // `${vehicleId}_${folderKey}` -> { file, name } — awaiting rename confirmation
 
-async function handleUploadDocument(vehicleId, file, category) {
+const MONTH_ABBR_SHORT = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEPT','OCT','NOV','DEC'];
+function getFileExt(filename) {
+  const m = /\.[a-zA-Z0-9]+$/.exec(filename || '');
+  return m ? m[0] : '';
+}
+function suggestDocName(vehicleNo, file) {
+  const ext = getFileExt(file.name);
+  const now = new Date();
+  const mon = MONTH_ABBR_SHORT[now.getMonth()];
+  const yy = String(now.getFullYear()).slice(-2);
+  return `${vehicleNo}-${mon}${yy}${ext}`;
+}
+
+async function handleConfirmUpload(vehicleId, folderKey) {
+  const key = `${vehicleId}_${folderKey}`;
+  const pending = pendingUpload[key];
+  if (!pending) return;
+  const inputEl = document.getElementById(`f_${vehicleId}_${folderKey}_rename_input`);
+  let chosenName = (inputEl ? inputEl.value.trim() : '') || pending.name;
+  const ext = getFileExt(pending.file.name);
+  if (ext && !chosenName.toLowerCase().endsWith(ext.toLowerCase())) chosenName += ext;
+  delete pendingUpload[key];
+  await handleUploadDocument(vehicleId, pending.file, folderKey, chosenName);
+}
+function handleCancelUpload(vehicleId, folderKey) {
+  delete pendingUpload[`${vehicleId}_${folderKey}`];
+  render();
+}
+
+async function handleUploadDocument(vehicleId, file, category, displayName) {
   if (!file) return;
   if (file.size > MAX_UPLOAD_BYTES) {
     uploadError[vehicleId] = `"${file.name}" is over 10MB — compress it or take a lighter-quality photo.`;
@@ -544,7 +577,7 @@ async function handleUploadDocument(vehicleId, file, category) {
     const data = await res.json();
     const v = vehicles.find(x => x.id === vehicleId);
     const docs = (v.documents || []).concat([{
-      name: file.name, url: data.secure_url, path: data.public_id, uploadedAt: new Date().toISOString(),
+      name: displayName || file.name, url: data.secure_url, path: data.public_id, uploadedAt: new Date().toISOString(),
       category: category || 'receipt',
     }]);
     await saveVehicleRemote({ ...v, documents: docs });
@@ -663,6 +696,8 @@ root.addEventListener('click', (e) => {
   else if (action === 'open-folder') { navigateTo('folder', { vehicleId: id, folder: btn.dataset.folder }); }
   else if (action === 'nav-back') { navigateBack(); }
   else if (action === 'upload-trigger') { const inp = document.getElementById(btn.dataset.inputId); if (inp) inp.click(); }
+  else if (action === 'confirm-upload') { handleConfirmUpload(id, btn.dataset.folder); }
+  else if (action === 'cancel-upload') { handleCancelUpload(id, btn.dataset.folder); }
   else if (action === 'delete-document') { handleDeleteDocument(id, btn.dataset.path); }
   else if (action === 'download-document') { handleDownloadDocument(btn.dataset.url, btn.dataset.name, btn); }
 });
@@ -673,7 +708,13 @@ root.addEventListener('change', (e) => {
   }
   if (e.target.matches('[data-doc-input]')) {
     const file = e.target.files && e.target.files[0];
-    handleUploadDocument(e.target.dataset.id, file, e.target.dataset.category);
+    if (file) {
+      const vehicleId = e.target.dataset.id;
+      const category = e.target.dataset.category;
+      const v = vehicles.find(x => x.id === vehicleId);
+      pendingUpload[`${vehicleId}_${category}`] = { file, name: suggestDocName(v ? v.vehicleNo : 'DOC', file) };
+      render();
+    }
     e.target.value = '';
   }
 });
@@ -809,6 +850,17 @@ function renderDocumentsScreen(vehicleId) {
     <div class="folder-grid">${tiles}</div>
   </div>`;
 }
+function renderPendingUploadPanel(vehicleId, folderKey, pending) {
+  const inputId = `f_${vehicleId}_${folderKey}_rename_input`;
+  return `<div class="pending-upload">
+    <div class="pending-upload-label">Name this file before uploading:</div>
+    <input type="text" id="${inputId}" class="text-input" value="${escapeHtml(pending.name)}"/>
+    <div class="pending-upload-actions">
+      <button type="button" class="btn btn-outline" data-action="cancel-upload" data-id="${vehicleId}" data-folder="${folderKey}">Cancel</button>
+      <button type="button" class="btn btn-primary" data-action="confirm-upload" data-id="${vehicleId}" data-folder="${folderKey}">⬆ Upload</button>
+    </div>
+  </div>`;
+}
 function renderFolderScreen(vehicleId, folderKey) {
   const v = vehicles.find(x => x.id === vehicleId);
   const folder = DOC_FOLDERS.find(f => f.key === folderKey) || DOC_FOLDERS[0];
@@ -816,6 +868,7 @@ function renderFolderScreen(vehicleId, folderKey) {
   const docs = (v.documents || []).filter(d => (d.category || 'receipt') === folder.key);
   const isUploading = !!uploadingFor[v.id];
   const err = uploadError[v.id];
+  const pending = pendingUpload[`${v.id}_${folder.key}`];
   const inputId = `f_${v.id}_${folder.key}_doc_input`;
   const list = docs.length === 0
     ? `<div class="empty-state" style="padding:20px 8px">No ${folder.label.toLowerCase()} uploaded yet.</div>`
@@ -823,10 +876,13 @@ function renderFolderScreen(vehicleId, folderKey) {
   return `<div class="wrap screen-enter">
     ${renderScreenHeader(`${folder.icon} ${folder.label}`, v.vehicleNo)}
     ${list}
-    <div style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <button type="button" class="btn btn-primary" data-action="upload-trigger" data-id="${v.id}" data-input-id="${inputId}" ${isUploading ? 'disabled' : ''}>${isUploading ? 'Uploading…' : `⬆ Upload to ${folder.label}`}</button>
-      <input type="file" id="${inputId}" data-doc-input data-id="${v.id}" data-category="${folder.key}" accept="image/*,application/pdf" style="display:none"/>
-    </div>
+    ${pending
+      ? renderPendingUploadPanel(v.id, folder.key, pending)
+      : `<div style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+           <button type="button" class="btn btn-primary" data-action="upload-trigger" data-id="${v.id}" data-input-id="${inputId}" ${isUploading ? 'disabled' : ''}>${isUploading ? 'Uploading…' : `⬆ Upload to ${folder.label}`}</button>
+           <input type="file" id="${inputId}" data-doc-input data-id="${v.id}" data-category="${folder.key}" accept="image/*,application/pdf" style="display:none"/>
+         </div>`
+    }
     ${err ? `<div class="error-text" style="margin-top:8px">${escapeHtml(err)}</div>` : ''}
   </div>`;
 }
