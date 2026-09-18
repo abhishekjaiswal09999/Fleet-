@@ -134,6 +134,13 @@
   .notif-debug { background: #161B22; border: 1px solid #262E39; border-radius: 7px; padding: 10px 12px; margin-bottom: 12px; font-size: 11.5px; color: #8A93A3; line-height: 1.6; }
   .notif-debug-title { font-weight: 700; color: #C3CAD4; margin-bottom: 4px; }
   .notif-success { background: rgba(63,178,127,0.14); border: 1px solid rgba(63,178,127,0.35); color: #3FB27F; border-radius: 7px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; }
+  .menu-wrap { position: relative; }
+  .menu-btn { background: #1B212B; border: 1px solid #2B3441; color: #EDEFF2; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 17px; line-height: 1; flex-shrink: 0; }
+  .menu-dropdown { position: absolute; right: 0; top: 38px; background: #1B212B; border: 1px solid #2B3441; border-radius: 8px; padding: 6px; min-width: 230px; z-index: 30; box-shadow: 0 8px 24px rgba(0,0,0,0.45); }
+  .menu-item { width: 100%; text-align: left; background: transparent; border: none; color: #EDEFF2; padding: 9px 10px; border-radius: 6px; font-size: 12.5px; cursor: pointer; display: block; font-family: inherit; }
+  .menu-item:not(:disabled):hover { background: #232B37; }
+  .menu-item:disabled { color: #5B6472; cursor: default; opacity: 0.8; }
+  .fix-log-btn { font-size: 11px; padding: 6px 8px; }
 
   @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
 </style>
@@ -324,7 +331,7 @@ const SEED_VEHICLES = [
 let vehicles = [];
 let loaded = false;
 let syncStatus = 'connecting'; // connecting | live | offline | error
-const ui = { search: '', filter: 'all', expanded: new Set(), addOpen: false, confirmDelete: {}, justSaved: {}, addError: '' };
+const ui = { search: '', filter: 'all', expanded: new Set(), addOpen: false, confirmDelete: {}, justSaved: {}, addError: '', menuOpen: false, confirmResetLog: {} };
 const lifetimeOverride = {}; // id -> bool, only while user is actively editing the checkbox
 let view = { screen: 'main' }; // 'main' | { screen: 'documents', vehicleId } | { screen: 'folder', vehicleId, folder: 'receipt'|'rc' } | { screen: 'spend' }
 const shareState = { text: '', mode: '' }; // mode: 'copied' | 'fallback'
@@ -426,20 +433,44 @@ function readVehicleFormFromDOM(id) {
 async function handleSaveVehicle(id) {
   const before = vehicles.find(v => v.id === id);
   const after = readVehicleFormFromDOM(id);
-  const newLogEntries = [];
+  // Log one spend entry per (compliance type, due date). Editing the same
+  // due date more than once before it's final just replaces that entry
+  // instead of stacking a new one — this is what previously made Annual
+  // Spend inflate every time a date got tweaked and re-saved.
+  let log = (before && before.paymentLog || []).slice();
   for (const { key, label } of COMPLIANCE_TYPES) {
     const b = before ? before[key] : null;
     const a = after[key];
-    if (a && a.amount != null && (!b || b.dueDate !== a.dueDate || b.amount !== a.amount)) {
-      newLogEntries.push({ type: key, label, amount: a.amount, dueDate: a.dueDate, loggedAt: new Date().toISOString() });
-    }
+    if (!a || a.amount == null || !a.dueDate) continue;
+    const unchanged = b && b.dueDate === a.dueDate && b.amount === a.amount;
+    if (unchanged) continue;
+    log = log.filter(e => !(e.type === key && e.dueDate === a.dueDate));
+    log.push({ type: key, label, amount: a.amount, dueDate: a.dueDate, loggedAt: new Date().toISOString() });
   }
-  after.paymentLog = (before && before.paymentLog || []).concat(newLogEntries);
+  after.paymentLog = log;
   await saveVehicleRemote(after);
   haptic(18);
   ui.justSaved[id] = true;
   render();
   setTimeout(() => { delete ui.justSaved[id]; render(); }, 1500);
+}
+async function handleResetPaymentLog(id) {
+  const v = vehicles.find(x => x.id === id);
+  if (!v) return;
+  // Rebuilds this vehicle's spend history from scratch using only its
+  // currently-saved amounts — use this to clear out any stray entries left
+  // over from repeated edits/testing before the logging fix above.
+  const freshLog = [];
+  for (const { key, label } of COMPLIANCE_TYPES) {
+    const data = v[key];
+    if (data && data.amount != null && data.dueDate) {
+      freshLog.push({ type: key, label, amount: data.amount, dueDate: data.dueDate, loggedAt: new Date().toISOString() });
+    }
+  }
+  haptic(18);
+  await saveVehicleRemote({ ...v, paymentLog: freshLog });
+  delete ui.confirmResetLog[id];
+  render();
 }
 async function handleArchiveToggle(id) {
   const v = vehicles.find(x => x.id === id);
@@ -595,6 +626,7 @@ function exportBackup() {
 
 // ---------------- event delegation ----------------
 root.addEventListener('click', (e) => {
+  if (ui.menuOpen && !e.target.closest('.menu-wrap')) { ui.menuOpen = false; render(); }
   const btn = e.target.closest('[data-action]');
   if (!btn) return;
   haptic(6); // a light tap on every actionable press, native-app style
@@ -603,6 +635,7 @@ root.addEventListener('click', (e) => {
   if (action === 'toggle-expand') { ui.expanded.has(id) ? ui.expanded.delete(id) : ui.expanded.add(id); render(); }
   else if (action === 'toggle-filter') { ui.filter = (ui.filter === btn.dataset.filter) ? 'all' : btn.dataset.filter; render(); }
   else if (action === 'toggle-add') { ui.addOpen = !ui.addOpen; ui.addError=''; render(); }
+  else if (action === 'toggle-menu') { ui.menuOpen = !ui.menuOpen; render(); }
   else if (action === 'save-vehicle') { handleSaveVehicle(id); }
   else if (action === 'archive-toggle') { handleArchiveToggle(id); }
   else if (action === 'delete-request') { ui.confirmDelete[id] = true; render(); }
@@ -610,9 +643,12 @@ root.addEventListener('click', (e) => {
   else if (action === 'delete-confirm') { handleDeleteConfirmed(id); }
   else if (action === 'restore-vehicle') { handleRestoreVehicle(id); }
   else if (action === 'delete-forever') { handlePermanentDelete(id); }
+  else if (action === 'reset-log-request') { ui.confirmResetLog[id] = true; render(); }
+  else if (action === 'reset-log-cancel') { delete ui.confirmResetLog[id]; render(); }
+  else if (action === 'reset-log-confirm') { handleResetPaymentLog(id); }
   else if (action === 'open-spend') { navigateTo('spend'); }
   else if (action === 'share-dues') { handleShareDues(); }
-  else if (action === 'enable-notifications') { handleEnableNotifications(); }
+  else if (action === 'enable-notifications') { ui.menuOpen = false; handleEnableNotifications(); }
   else if (action === 'pay-due') { handlePayDue(btn.dataset.vehicleNo, btn); }
   else if (action === 'copy-chassis') { handleCopyChassis(btn.dataset.chassis, btn); }
   else if (action === 'quick-renew') { quickRenew(id, btn.dataset.field, Number(btn.dataset.months), btn); }
@@ -803,6 +839,8 @@ function renderVehicleRow(v) {
   let expandHtml = '';
   if (isExpanded) {
     const confirming = !!ui.confirmDelete[v.id];
+    const confirmingResetLog = !!ui.confirmResetLog[v.id];
+    const hasLog = (v.paymentLog || []).length > 0;
     expandHtml = `<div class="expand-body">
       <div class="field-grid">
         <div class="field"><label>Vehicle number<input class="text-input" id="f_${v.id}_vehicleNo" value="${escapeHtml(v.vehicleNo)}"/></label></div>
@@ -829,6 +867,16 @@ function renderVehicleRow(v) {
           <button class="btn btn-primary" data-action="save-vehicle" data-id="${v.id}">✓ Save changes</button>
         </div>
       </div>
+      ${hasLog ? `<div class="actions-row" style="margin-top:-2px">
+        <div class="actions-left">
+          ${confirmingResetLog
+            ? `<span class="error-text">Reset this vehicle's Annual Spend history to just its current saved amounts?</span>
+               <button class="btn btn-danger-filled" data-action="reset-log-confirm" data-id="${v.id}">Yes, reset</button>
+               <button class="btn btn-outline" data-action="reset-log-cancel" data-id="${v.id}">Cancel</button>`
+            : `<button class="btn btn-outline fix-log-btn" data-action="reset-log-request" data-id="${v.id}">🧹 Fix spend log</button>`
+          }
+        </div>
+      </div>` : ''}
     </div>`;
   }
 
@@ -1017,12 +1065,19 @@ async function handleShareDues() {
   render();
   if (shareState.mode === 'copied') setTimeout(() => { shareState.text = ''; shareState.mode = ''; render(); }, 4000);
 }
-function renderNotifButton() {
-  if (notifStatus === 'unsupported' || notifStatus === 'checking') return '';
-  if (notifStatus === 'granted' && !notifError) return `<button type="button" class="btn btn-outline quick-action-btn" data-action="enable-notifications">🔔 Notifications on (tap to re-check)</button>`;
-  if (notifStatus === 'denied') return `<button type="button" class="btn btn-outline quick-action-btn" disabled style="opacity:0.6">🔕 Blocked — check phone settings</button>`;
+function renderNotifMenuItem() {
+  if (notifStatus === 'checking') return `<button type="button" class="menu-item" disabled>Checking notification support…</button>`;
+  if (notifStatus === 'unsupported') return `<button type="button" class="menu-item" disabled>🔕 Notifications not supported here</button>`;
+  if (notifStatus === 'granted' && !notifError) return `<button type="button" class="menu-item" data-action="enable-notifications">🔔 Notifications on (tap to re-check)</button>`;
+  if (notifStatus === 'denied') return `<button type="button" class="menu-item" disabled>🔕 Blocked — check phone settings</button>`;
   const label = notifStatus === 'granted' ? '🔔 Retry registration' : '🔔 Enable Notifications';
-  return `<button type="button" class="btn btn-primary quick-action-btn" data-action="enable-notifications">${label}</button>`;
+  return `<button type="button" class="menu-item" data-action="enable-notifications">${label}</button>`;
+}
+function renderHeaderMenu() {
+  return `<div class="menu-wrap">
+    <button type="button" class="menu-btn" data-action="toggle-menu" aria-label="More options">⋮</button>
+    ${ui.menuOpen ? `<div class="menu-dropdown">${renderNotifMenuItem()}</div>` : ''}
+  </div>`;
 }
 function renderNotifDebug() {
   if (!notifDebugLines.length) return '';
@@ -1047,7 +1102,7 @@ function renderApp() {
   if (ui.filter === 'trash') {
     return `<div class="wrap">
       <header>
-        <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1>${renderSyncBadge()}</div>
+        <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1><div style="display:flex;align-items:center;gap:10px">${renderSyncBadge()}${renderHeaderMenu()}</div></div>
         <p class="subtitle">${activeVehicles.length} active · ${archivedVehicles.length} archived · shared live with everyone who opens this app</p>
       </header>
       <div class="stat-grid">
@@ -1081,7 +1136,7 @@ function renderApp() {
 
   return `<div class="wrap">
     <header>
-      <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1>${renderSyncBadge()}</div>
+      <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1><div style="display:flex;align-items:center;gap:10px">${renderSyncBadge()}${renderHeaderMenu()}</div></div>
       <p class="subtitle">${activeVehicles.length} active · ${archivedVehicles.length} archived · shared live with everyone who opens this app</p>
     </header>
     <div class="stat-grid">
@@ -1094,7 +1149,6 @@ function renderApp() {
     <div class="quick-actions">
       <button type="button" class="btn btn-outline quick-action-btn" data-action="open-spend">💰 Annual Spend</button>
       <button type="button" class="btn btn-outline quick-action-btn" data-action="share-dues">📤 Share this week's dues</button>
-      ${renderNotifButton()}
     </div>
     ${notifSuccessMsg ? `<div class="notif-success">🔔 ${escapeHtml(notifSuccessMsg)}</div>` : ''}
     ${notifError ? `<div class="error-text" style="margin-bottom:12px">🔔 ${escapeHtml(notifError)}</div>` : ''}
