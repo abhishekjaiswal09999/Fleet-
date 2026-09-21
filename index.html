@@ -49,10 +49,12 @@
   .row-chassis { font-size: 10.5px; color: #5B6472; margin-top: 1px; }
   .status-dots { display: flex; gap: 4px; flex-shrink: 0; }
   .status-dot { width: 18px; height: 18px; border-radius: 5px; font-size: 8.5px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
-  .chevron { flex-shrink: 0; transition: transform 0.15s; color: #5B6472; }
+  .chevron { flex-shrink: 0; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); color: #5B6472; }
   .chevron.open { transform: rotate(180deg); }
-  .expand-body { padding: 12px 12px 14px; border-top: 1px solid #2B3441; display: flex; flex-direction: column; gap: 10px; animation: fadeSlide 0.16s ease-out; }
+  .expand-body { padding: 12px 12px 14px; border-top: 1px solid #2B3441; display: flex; flex-direction: column; gap: 10px; animation: fadeSlide 0.18s cubic-bezier(0.22, 1, 0.36, 1); }
   @keyframes fadeSlide { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  .expand-body.closing { animation: fadeSlideOut 0.14s ease-in forwards; pointer-events: none; }
+  @keyframes fadeSlideOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-6px); } }
   .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .field label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #8A93A3; font-weight: 600; }
   .compliance-block { background: #161B22; border: 1px solid #262E39; border-radius: 7px; padding: 9px 10px; }
@@ -70,7 +72,7 @@
   .btn-danger-filled { background: rgba(229,72,77,0.15); border: 1px solid #E5484D; color: #E5484D; padding: 7px 9px; font-size: 12px; }
   .actions-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
   .actions-left { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .saved-flash { font-size: 11px; color: #3FB27F; }
+  .saved-flash { font-size: 11px; color: #3FB27F; animation: fadeSlide 0.2s ease-out; }
   .add-form { background: #1B212B; border: 1px solid #F4C41E; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
   .add-form-title { font-size: 13px; font-weight: 700; }
   .add-toggle-btn { width: 100%; justify-content: center; padding: 10px; border-style: dashed; }
@@ -80,19 +82,26 @@
   .legend-item { display: inline-flex; align-items: center; gap: 5px; }
   .legend-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
   .backup-note { margin-top: 18px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11.5px; color: #5B6472; }
-  .loading { min-height: 60vh; display: flex; align-items: center; justify-content: center; color: #5B6472; font-size: 13px; }
+  .loading { min-height: 60vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: #5B6472; font-size: 13px; }
+  .spinner { width: 30px; height: 30px; border-radius: 50%; border: 3px solid #2B3441; border-top-color: #F4C41E; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   /* tactile press feedback across all interactive elements */
-  button, .stat-block, .row-summary, .doc-row-name, .folder-tile, .docs-nav-btn {
-    transition: transform 0.08s ease, opacity 0.08s ease, background-color 0.15s ease;
+  button, .stat-block, .row-summary, .doc-row-name, .folder-tile, .docs-nav-btn, .menu-item, .menu-btn, .back-btn {
+    transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.1s ease, background-color 0.15s ease;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
-  button:active:not(:disabled), .stat-block:active, .row-summary:active, .folder-tile:active, .docs-nav-btn:active {
-    transform: scale(0.97);
+  button:active:not(:disabled), .stat-block:active, .row-summary:active, .folder-tile:active, .docs-nav-btn:active, .menu-item:active, .menu-btn:active, .back-btn:active {
+    transform: scale(0.96);
     opacity: 0.85;
+    transition: transform 0.06s ease-out, opacity 0.06s ease-out;
   }
 
   /* screen navigation (Documents / Folder views) */
   .screen-enter { animation: screenSlideIn 0.22s cubic-bezier(0.22, 1, 0.36, 1); }
   @keyframes screenSlideIn { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: translateX(0); } }
+  .screen-enter-back { animation: screenSlideInBack 0.22s cubic-bezier(0.22, 1, 0.36, 1); }
+  @keyframes screenSlideInBack { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: translateX(0); } }
   .screen-header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
   .back-btn { background: #1B212B; border: 1px solid #2B3441; color: #EDEFF2; width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
   .screen-title { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 800; }
@@ -131,17 +140,18 @@
   .spend-row:last-child { border-bottom: none; }
   .spend-note { font-size: 11.5px; color: #5B6472; margin-top: 16px; line-height: 1.5; }
   .foreground-notice { background: rgba(91,159,227,0.14); border: 1px solid rgba(91,159,227,0.35); color: #5B9FE3; border-radius: 7px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; animation: fadeSlide 0.2s ease-out; }
-  .notif-debug { background: #161B22; border: 1px solid #262E39; border-radius: 7px; padding: 10px 12px; margin-bottom: 12px; font-size: 11.5px; color: #8A93A3; line-height: 1.6; }
+  .notif-debug { background: #161B22; border: 1px solid #262E39; border-radius: 7px; padding: 10px 12px; margin-bottom: 12px; font-size: 11.5px; color: #8A93A3; line-height: 1.6; animation: fadeSlide 0.2s ease-out; }
   .notif-debug-title { font-weight: 700; color: #C3CAD4; margin-bottom: 4px; }
-  .notif-success { background: rgba(63,178,127,0.14); border: 1px solid rgba(63,178,127,0.35); color: #3FB27F; border-radius: 7px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; }
+  .notif-success { background: rgba(63,178,127,0.14); border: 1px solid rgba(63,178,127,0.35); color: #3FB27F; border-radius: 7px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; animation: fadeSlide 0.2s ease-out; }
   .menu-wrap { position: relative; }
   .menu-btn { background: #1B212B; border: 1px solid #2B3441; color: #EDEFF2; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 17px; line-height: 1; flex-shrink: 0; }
-  .menu-dropdown { position: absolute; right: 0; top: 38px; background: #1B212B; border: 1px solid #2B3441; border-radius: 8px; padding: 6px; min-width: 230px; z-index: 30; box-shadow: 0 8px 24px rgba(0,0,0,0.45); }
+  .menu-dropdown { position: absolute; right: 0; top: 38px; background: #1B212B; border: 1px solid #2B3441; border-radius: 8px; padding: 6px; min-width: 230px; z-index: 30; box-shadow: 0 8px 24px rgba(0,0,0,0.45); transform-origin: top right; animation: menuPop 0.14s cubic-bezier(0.22, 1, 0.36, 1); }
+  @keyframes menuPop { from { opacity: 0; transform: scale(0.92) translateY(-4px); } to { opacity: 1; transform: scale(1) translateY(0); } }
   .menu-item { width: 100%; text-align: left; background: transparent; border: none; color: #EDEFF2; padding: 9px 10px; border-radius: 6px; font-size: 12.5px; cursor: pointer; display: block; font-family: inherit; }
   .menu-item:not(:disabled):hover { background: #232B37; }
   .menu-item:disabled { color: #5B6472; cursor: default; opacity: 0.8; }
   .fix-log-btn { font-size: 11px; padding: 6px 8px; }
-  .filter-total-banner { background: #1B212B; border: 1px solid #2B3441; border-left: 3px solid #F2A93B; border-radius: 7px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; color: #C3CAD4; }
+  .filter-total-banner { background: #1B212B; border: 1px solid #2B3441; border-left: 3px solid #F2A93B; border-radius: 7px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; color: #C3CAD4; animation: fadeSlide 0.2s ease-out; }
   .filter-total-banner strong { font-family: 'JetBrains Mono', monospace; color: #F4C41E; font-size: 15px; }
   .filter-total-banner.overdue { border-left-color: #E5484D; }
   .filter-total-banner.overdue strong { color: #E5484D; }
@@ -153,7 +163,7 @@
 </style>
 </head>
 <body>
-<div id="root"><div class="loading">Loading your fleet…</div></div>
+<div id="root"><div class="loading"><div class="spinner"></div><div>Loading your fleet…</div></div></div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
@@ -341,6 +351,7 @@ let syncStatus = 'connecting'; // connecting | live | offline | error
 const ui = { search: '', filter: 'all', expanded: new Set(), addOpen: false, confirmDelete: {}, justSaved: {}, addError: '', menuOpen: false, confirmResetLog: {} };
 const lifetimeOverride = {}; // id -> bool, only while user is actively editing the checkbox
 let view = { screen: 'main' }; // 'main' | { screen: 'documents', vehicleId } | { screen: 'folder', vehicleId, folder: 'receipt'|'rc' } | { screen: 'spend' }
+let pendingNavAnim = ''; // consumed once by renderRoot() so the slide-in plays exactly once per navigation
 const shareState = { text: '', mode: '' }; // mode: 'copied' | 'fallback'
 
 const DOC_FOLDERS = [
@@ -352,13 +363,31 @@ function haptic(pattern) {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) { /* iOS Safari has no Vibration API — silently skip */ }
 }
 function navigateTo(screen, params) {
+  pendingNavAnim = 'screen-enter';
   view = { screen, ...(params || {}) };
   haptic(8);
   render();
 }
 function navigateBack() {
-  if (view.screen === 'folder') navigateTo('documents', { vehicleId: view.vehicleId });
-  else navigateTo('main');
+  pendingNavAnim = 'screen-enter screen-enter-back';
+  if (view.screen === 'folder') view = { screen: 'documents', vehicleId: view.vehicleId };
+  else view = { screen: 'main' };
+  haptic(8);
+  render();
+}
+function handleToggleExpand(id) {
+  if (ui.expanded.has(id)) {
+    const bodyEl = root.querySelector(`.vehicle-row[data-vehicle-id="${id}"] .expand-body`);
+    if (bodyEl) {
+      bodyEl.classList.add('closing');
+      setTimeout(() => { ui.expanded.delete(id); render(); }, 150);
+      return;
+    }
+    ui.expanded.delete(id);
+  } else {
+    ui.expanded.add(id);
+  }
+  render();
 }
 
 const root = document.getElementById('root');
@@ -370,7 +399,7 @@ function render() {
   const selEnd = active && typeof active.selectionEnd === 'number' ? active.selectionEnd : null;
   const scrollY = root.scrollTop;
 
-  root.innerHTML = loaded ? renderRoot() : '<div class="loading">Loading your fleet…</div>';
+  root.innerHTML = loaded ? renderRoot() : '<div class="loading"><div class="spinner"></div><div>Loading your fleet…</div></div>';
 
   if (activeId) {
     const el = document.getElementById(activeId);
@@ -382,10 +411,12 @@ function render() {
   root.scrollTop = scrollY;
 }
 function renderRoot() {
-  if (view.screen === 'documents') return renderDocumentsScreen(view.vehicleId);
-  if (view.screen === 'folder') return renderFolderScreen(view.vehicleId, view.folder);
-  if (view.screen === 'spend') return renderSpendScreen();
-  return renderApp();
+  const anim = pendingNavAnim;
+  pendingNavAnim = '';
+  if (view.screen === 'documents') return renderDocumentsScreen(view.vehicleId, anim);
+  if (view.screen === 'folder') return renderFolderScreen(view.vehicleId, view.folder, anim);
+  if (view.screen === 'spend') return renderSpendScreen(anim);
+  return renderApp(anim);
 }
 
 // ---------------- data layer (Firestore) ----------------
@@ -669,7 +700,7 @@ root.addEventListener('click', (e) => {
   haptic(6); // a light tap on every actionable press, native-app style
   const action = btn.dataset.action;
   const id = btn.dataset.id;
-  if (action === 'toggle-expand') { ui.expanded.has(id) ? ui.expanded.delete(id) : ui.expanded.add(id); render(); }
+  if (action === 'toggle-expand') { handleToggleExpand(id); }
   else if (action === 'toggle-filter') { ui.filter = (ui.filter === btn.dataset.filter) ? 'all' : btn.dataset.filter; render(); }
   else if (action === 'toggle-add') { ui.addOpen = !ui.addOpen; ui.addError=''; render(); }
   else if (action === 'toggle-menu') { ui.menuOpen = !ui.menuOpen; render(); }
@@ -832,9 +863,9 @@ function renderScreenHeader(title, subtitle) {
     <div><div class="screen-title">${title}</div>${subtitle ? `<div class="screen-subtitle">${subtitle}</div>` : ''}</div>
   </div>`;
 }
-function renderDocumentsScreen(vehicleId) {
+function renderDocumentsScreen(vehicleId, anim = '') {
   const v = vehicles.find(x => x.id === vehicleId);
-  if (!v) return `<div class="wrap screen-enter">${renderScreenHeader('Vehicle not found')}</div>`;
+  if (!v) return `<div class="wrap ${anim}">${renderScreenHeader('Vehicle not found')}</div>`;
   const tiles = DOC_FOLDERS.map(f => `
     <button type="button" class="folder-tile" data-action="open-folder" data-id="${v.id}" data-folder="${f.key}">
       <div class="folder-icon">${f.icon}</div>
@@ -845,7 +876,7 @@ function renderDocumentsScreen(vehicleId) {
       <div class="folder-count">${docCountByCategory(v, f.key)}</div>
       <div class="folder-chevron">›</div>
     </button>`).join('');
-  return `<div class="wrap screen-enter">
+  return `<div class="wrap ${anim}">
     ${renderScreenHeader('Documents', v.vehicleNo)}
     <div class="folder-grid">${tiles}</div>
   </div>`;
@@ -861,10 +892,10 @@ function renderPendingUploadPanel(vehicleId, folderKey, pending) {
     </div>
   </div>`;
 }
-function renderFolderScreen(vehicleId, folderKey) {
+function renderFolderScreen(vehicleId, folderKey, anim = '') {
   const v = vehicles.find(x => x.id === vehicleId);
   const folder = DOC_FOLDERS.find(f => f.key === folderKey) || DOC_FOLDERS[0];
-  if (!v) return `<div class="wrap screen-enter">${renderScreenHeader('Vehicle not found')}</div>`;
+  if (!v) return `<div class="wrap ${anim}">${renderScreenHeader('Vehicle not found')}</div>`;
   const docs = (v.documents || []).filter(d => (d.category || 'receipt') === folder.key);
   const isUploading = !!uploadingFor[v.id];
   const err = uploadError[v.id];
@@ -873,7 +904,7 @@ function renderFolderScreen(vehicleId, folderKey) {
   const list = docs.length === 0
     ? `<div class="empty-state" style="padding:20px 8px">No ${folder.label.toLowerCase()} uploaded yet.</div>`
     : `<div class="doc-list">${docs.map(d => renderDocRow(v, d)).join('')}</div>`;
-  return `<div class="wrap screen-enter">
+  return `<div class="wrap ${anim}">
     ${renderScreenHeader(`${folder.icon} ${folder.label}`, v.vehicleNo)}
     ${list}
     ${pending
@@ -940,7 +971,7 @@ function renderVehicleRow(v) {
     </div>`;
   }
 
-  return `<div class="vehicle-row${isExpanded ? ' expanded' : ''}${!v.active ? ' inactive' : ''}">
+  return `<div class="vehicle-row${isExpanded ? ' expanded' : ''}${!v.active ? ' inactive' : ''}" data-vehicle-id="${v.id}">
     <button class="row-summary" data-action="toggle-expand" data-id="${v.id}">
       ${renderPlate(v.vehicleNo)}
       <div class="row-mid">
@@ -1041,7 +1072,7 @@ function renderFilterTotalBanner(level) {
   const label = level === 'overdue' ? 'Overdue' : 'Due within 30 days';
   return `<div class="filter-total-banner${level === 'overdue' ? ' overdue' : ''}">💰 ${label}: <strong>${formatINR(total)}</strong> across ${count} item${count === 1 ? '' : 's'}</div>`;
 }
-function renderSpendScreen() {
+function renderSpendScreen(anim = '') {
   const year = new Date().getFullYear();
   const { total, byType, perVehicle } = computeAnnualSpend(year);
   const typeRows = COMPLIANCE_TYPES.map(({ key, label }) => `
@@ -1049,7 +1080,7 @@ function renderSpendScreen() {
   const vehicleRows = perVehicle.length === 0
     ? `<div class="empty-state" style="padding:20px 8px">No logged payments yet this year — totals fill in as you save renewed dates and amounts.</div>`
     : perVehicle.map(p => `<div class="spend-row"><span>${escapeHtml(p.vehicleNo)}</span><span>${formatINR(p.total)}</span></div>`).join('');
-  return `<div class="wrap screen-enter">
+  return `<div class="wrap ${anim}">
     ${renderScreenHeader(`💰 Annual Spend`, `${year} · fleet-wide`)}
     <div class="spend-total-card">
       <div class="spend-total-label">Total logged this year</div>
@@ -1170,7 +1201,7 @@ function renderShareFallback() {
   </div>`;
 }
 
-function renderApp() {
+function renderApp(anim = '') {
   const activeVehicles = vehicles.filter(v => v.active && !v.deletedAt);
   const archivedVehicles = vehicles.filter(v => !v.active && !v.deletedAt);
   const trashVehicles = vehicles.filter(v => v.deletedAt).sort((a,b) => new Date(b.deletedAt) - new Date(a.deletedAt));
@@ -1179,7 +1210,7 @@ function renderApp() {
   const missingCount = activeVehicles.filter(v => COMPLIANCE_TYPES.some(({key}) => getComplianceStatus(v,key).level === 'unset')).length;
 
   if (ui.filter === 'trash') {
-    return `<div class="wrap">
+    return `<div class="wrap ${anim}">
       <header>
         <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1><div style="display:flex;align-items:center;gap:10px">${renderSyncBadge()}${renderHeaderMenu()}</div></div>
         <p class="subtitle">${activeVehicles.length} active · ${archivedVehicles.length} archived · shared live with everyone who opens this app</p>
@@ -1213,7 +1244,7 @@ function renderApp() {
     return (wa.days ?? Infinity) - (wb.days ?? Infinity);
   });
 
-  return `<div class="wrap">
+  return `<div class="wrap ${anim}">
     <header>
       <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1><div style="display:flex;align-items:center;gap:10px">${renderSyncBadge()}${renderHeaderMenu()}</div></div>
       <p class="subtitle">${activeVehicles.length} active · ${archivedVehicles.length} archived · shared live with everyone who opens this app</p>
