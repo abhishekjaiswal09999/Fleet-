@@ -692,6 +692,54 @@ function exportBackup() {
   haptic(15);
 }
 
+function csvEscape(value) {
+  const s = value == null ? '' : String(value);
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+function exportCsv() {
+  const headers = ['Vehicle No','Chassis No','Status','Current Status','Tax Due Date','Tax Amount','Tax Lifetime','Insurance Due Date','Insurance Amount','Fitness Due Date','Fitness Amount','PUC Due Date','PUC Amount','Notes'];
+  const rows = vehicles.filter(v => !v.deletedAt).map(v => {
+    const worst = getVehicleWorstStatus(v);
+    return [
+      v.vehicleNo,
+      v.chassisNo || '',
+      v.active ? 'Active' : 'Archived',
+      worst.level === 'unset' ? 'No dates set' : `${worst.typeLabel} - ${worst.label}`,
+      v.tax.isLifetime ? '' : (v.tax.dueDate || ''),
+      v.tax.isLifetime ? '' : (v.tax.amount ?? ''),
+      v.tax.isLifetime ? 'Yes' : 'No',
+      v.insurance.dueDate || '',
+      v.insurance.amount ?? '',
+      v.fitness.dueDate || '',
+      v.fitness.amount ?? '',
+      v.puc.dueDate || '',
+      v.puc.amount ?? '',
+      v.notes || '',
+    ].map(csvEscape).join(',');
+  });
+  const csv = [headers.map(csvEscape).join(','), ...rows].join('\r\n');
+  // Leading BOM so Excel opens it as UTF-8 instead of mangling the ₹/non-ASCII text.
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `fleet-compliance-${todayStr()}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  haptic(15);
+}
+
+function handleRefreshApp(btn) {
+  haptic(10);
+  const icon = btn && btn.querySelector('.refresh-icon');
+  if (icon) icon.style.animation = 'spin 0.5s linear';
+  setTimeout(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('_r', Date.now()); // cache-bust so this always fetches the live index.html, not a cached shell
+    window.location.href = url.toString();
+  }, 220);
+}
+
 // ---------------- event delegation ----------------
 root.addEventListener('click', (e) => {
   if (ui.menuOpen && !e.target.closest('.menu-wrap')) { ui.menuOpen = false; render(); }
@@ -723,6 +771,8 @@ root.addEventListener('click', (e) => {
   else if (action === 'undo-quick-renew') { undoQuickRenew(id, btn.dataset.field, Number(btn.dataset.months), btn.dataset.label, btn); }
   else if (action === 'add-submit') { submitAddForm(); }
   else if (action === 'export-backup') { exportBackup(); }
+  else if (action === 'export-csv') { exportCsv(); }
+  else if (action === 'refresh-app') { handleRefreshApp(btn); }
   else if (action === 'open-documents') { navigateTo('documents', { vehicleId: id }); }
   else if (action === 'open-folder') { navigateTo('folder', { vehicleId: id, folder: btn.dataset.folder }); }
   else if (action === 'nav-back') { navigateBack(); }
@@ -1183,6 +1233,11 @@ function renderNotifMenuItem() {
   const label = notifStatus === 'granted' ? '🔔 Retry registration' : '🔔 Enable Notifications';
   return `<button type="button" class="menu-item" data-action="enable-notifications">${label}</button>`;
 }
+function renderRefreshButton() {
+  return `<button type="button" class="menu-btn" data-action="refresh-app" aria-label="Refresh">
+    <svg class="refresh-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+  </button>`;
+}
 function renderHeaderMenu() {
   return `<div class="menu-wrap">
     <button type="button" class="menu-btn" data-action="toggle-menu" aria-label="More options">⋮</button>
@@ -1212,7 +1267,7 @@ function renderApp(anim = '') {
   if (ui.filter === 'trash') {
     return `<div class="wrap ${anim}">
       <header>
-        <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1><div style="display:flex;align-items:center;gap:10px">${renderSyncBadge()}${renderHeaderMenu()}</div></div>
+        <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1><div style="display:flex;align-items:center;gap:10px">${renderSyncBadge()}${renderRefreshButton()}${renderHeaderMenu()}</div></div>
         <p class="subtitle">${activeVehicles.length} active · ${archivedVehicles.length} archived · shared live with everyone who opens this app</p>
       </header>
       <div class="stat-grid">
@@ -1246,7 +1301,7 @@ function renderApp(anim = '') {
 
   return `<div class="wrap ${anim}">
     <header>
-      <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1><div style="display:flex;align-items:center;gap:10px">${renderSyncBadge()}${renderHeaderMenu()}</div></div>
+      <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1><div style="display:flex;align-items:center;gap:10px">${renderSyncBadge()}${renderRefreshButton()}${renderHeaderMenu()}</div></div>
       <p class="subtitle">${activeVehicles.length} active · ${archivedVehicles.length} archived · shared live with everyone who opens this app</p>
     </header>
     <div class="stat-grid">
@@ -1276,7 +1331,10 @@ function renderApp(anim = '') {
     <div style="margin-top:14px">${renderAddForm()}</div>
     <div class="backup-note">
       <span>Want a local safety-net copy?</span>
-      <button class="btn btn-outline" data-action="export-backup">⬇ Export backup</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-outline" data-action="export-backup">⬇ JSON backup</button>
+        <button class="btn btn-outline" data-action="export-csv">⬇ CSV</button>
+      </div>
     </div>
     <div class="legend">
       <span class="legend-item"><span class="legend-dot" style="background:#E5484D"></span>Overdue</span>
