@@ -139,6 +139,32 @@
   .spend-row { display: flex; justify-content: space-between; padding: 11px 14px; font-size: 13px; border-bottom: 1px solid #232B37; font-family: 'JetBrains Mono', monospace; }
   .spend-row:last-child { border-bottom: none; }
   .spend-note { font-size: 11.5px; color: #5B6472; margin-top: 16px; line-height: 1.5; }
+  .spend-row.zero { color: #5B6472; }
+  .recheck-nav-btn { width: 100%; justify-content: space-between; display: flex; align-items: center; margin-bottom: 4px; }
+  .recheck-badge { background: #F2A93B; color: #15161A; border-radius: 999px; min-width: 22px; height: 22px; padding: 0 7px; display: inline-flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 800; margin-left: auto; margin-right: 8px; }
+  .recheck-badge.zero { background: #12161C; color: #8A93A3; border: 1px solid #2B3441; }
+  .recheck-list { display: flex; flex-direction: column; gap: 10px; }
+  .recheck-card { background: #1B212B; border: 1px solid #2B3441; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .recheck-card.voided { opacity: 0.7; border-style: dashed; }
+  .recheck-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .recheck-amount { font-family: 'JetBrains Mono', monospace; font-weight: 800; font-size: 15px; }
+  .recheck-amount.voided { text-decoration: line-through; color: #5B6472; }
+  .recheck-meta { font-size: 11.5px; color: #8A93A3; line-height: 1.5; }
+  .reason-tag { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: rgba(242,169,59,0.14); border: 1px solid rgba(242,169,59,0.35); color: #F2A93B; margin: 2px 4px 0 0; }
+  .reason-tag.void { background: rgba(229,72,77,0.14); border-color: rgba(229,72,77,0.35); color: #E5484D; }
+  .spend-tile-grid { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+  .spend-tile-amount { font-family: 'JetBrains Mono', monospace; font-weight: 800; font-size: 13.5px; color: #F4C41E; flex-shrink: 0; }
+  .spend-tile-amount.zero { color: #5B6472; }
+  .month-tile.zero, .vehicle-tile.zero { opacity: 0.6; }
+  .tx-card { background: #1B212B; border: 1px solid #2B3441; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .tx-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .tx-line { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; padding-top: 7px; border-top: 1px solid #232B37; }
+  .tx-line-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .tx-line-sub { font-size: 10.5px; color: #5B6472; }
+  .tx-line-amt { font-family: 'JetBrains Mono', monospace; font-weight: 700; flex-shrink: 0; }
+  .tx-line.voided { opacity: 0.55; }
+  .tx-line.voided .tx-line-amt { text-decoration: line-through; }
+  .tx-month-title { font-size: 12px; font-weight: 700; color: #C3CAD4; text-transform: uppercase; letter-spacing: 0.5px; margin: 16px 0 8px; display: flex; justify-content: space-between; }
   .foreground-notice { background: rgba(91,159,227,0.14); border: 1px solid rgba(91,159,227,0.35); color: #5B9FE3; border-radius: 7px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; animation: fadeSlide 0.2s ease-out; }
   .notif-debug { background: #161B22; border: 1px solid #262E39; border-radius: 7px; padding: 10px 12px; margin-bottom: 12px; font-size: 11.5px; color: #8A93A3; line-height: 1.6; animation: fadeSlide 0.2s ease-out; }
   .notif-debug-title { font-weight: 700; color: #C3CAD4; margin-bottom: 4px; }
@@ -264,6 +290,17 @@ function formatDateDisplay(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   return `${d} ${MONTH_NAMES[m - 1]} ${y}`;
 }
+const MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function formatDateTimeDisplay(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getDate()} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}, ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function monthKeyFromIso(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+}
 function makeId() { return 'v-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 function escapeHtml(s) {
   if (s == null) return '';
@@ -371,6 +408,9 @@ function navigateTo(screen, params) {
 function navigateBack() {
   pendingNavAnim = 'screen-enter screen-enter-back';
   if (view.screen === 'folder') view = { screen: 'documents', vehicleId: view.vehicleId };
+  else if (view.screen === 'recheck' || view.screen === 'spend-months' || view.screen === 'spend-vehicles') view = { screen: 'spend' };
+  else if (view.screen === 'month-detail') view = { screen: 'spend-months' };
+  else if (view.screen === 'vehicle-spend') view = { screen: 'spend-vehicles' };
   else view = { screen: 'main' };
   haptic(8);
   render();
@@ -416,6 +456,11 @@ function renderRoot() {
   if (view.screen === 'documents') return renderDocumentsScreen(view.vehicleId, anim);
   if (view.screen === 'folder') return renderFolderScreen(view.vehicleId, view.folder, anim);
   if (view.screen === 'spend') return renderSpendScreen(anim);
+  if (view.screen === 'recheck') return renderRecheckScreen(anim);
+  if (view.screen === 'spend-months') return renderSpendMonthsScreen(anim);
+  if (view.screen === 'month-detail') return renderMonthDetailScreen(view.monthKey, anim);
+  if (view.screen === 'spend-vehicles') return renderSpendVehiclesScreen(anim);
+  if (view.screen === 'vehicle-spend') return renderVehicleSpendScreen(view.vehicleId, anim);
   return renderApp(anim);
 }
 
@@ -467,25 +512,69 @@ function readVehicleFormFromDOM(id) {
   };
 }
 
+// ---------------- payment log ----------------
+// Each payment entry is tied to one vehicle + one compliance type + the due date it
+// renewed the vehicle TO (e.g. tax paid in Oct -> due date 31 Dec).
+//   status: 'active' (counts in Annual Spend) | 'void' (ignored in totals, kept for audit)
+// Rules applied on every save:
+//   - due date moved FORWARD with an amount  -> one entry for that type + due date
+//     (saving the same date again updates that entry instead of adding a second one)
+//   - due date moved BACK                    -> payments that pushed it past that date are voided
+//   - same date, amount edited               -> amount of the existing entry is corrected
+// Entries from older versions have no `status` and are treated as active.
+function applyPaymentLogChanges(before, after) {
+  const log = ((before && before.paymentLog) || []).map(e => ({ ...e }));
+  const now = new Date().toISOString();
+  for (const { key, label } of COMPLIANCE_TYPES) {
+    const b = before ? before[key] : null;
+    const a = after[key];
+    if (!a) continue;
+    const bDate = b ? (b.dueDate || null) : null;
+    const bAmt = b && b.amount != null ? b.amount : null;
+    const aDate = a.dueDate || null;
+    const aAmt = a.amount != null ? a.amount : null;
+    if (bDate === aDate && bAmt === aAmt) continue; // nothing changed for this type
+
+    const isActive = (e) => e.type === key && e.status !== 'void';
+
+    // Date moved backwards -> undo the payments that had pushed it forward.
+    if (aDate && bDate && aDate < bDate) {
+      for (const e of log) {
+        if (isActive(e) && e.dueDate && e.dueDate > aDate) {
+          e.status = 'void';
+          e.voidedAt = now;
+          e.voidReason = `Due date moved back to ${formatDateDisplay(aDate)}`;
+        }
+      }
+      continue;
+    }
+
+    if (aAmt == null || !aDate) continue; // no amount or no date -> nothing to log
+
+    const existing = log.find(e => isActive(e) && e.dueDate === aDate);
+    if (existing) {
+      if (existing.amount !== aAmt) {
+        existing.amount = aAmt;
+        existing.edits = (existing.edits || 0) + 1;
+        existing.lastEditedAt = now;
+      } else if (aDate !== bDate) {
+        // Moved to a due date that already has a payment logged -> saved again for the same period.
+        existing.resaves = (existing.resaves || 0) + 1;
+        existing.lastResavedAt = now;
+      }
+    } else if (aDate !== bDate) {
+      log.push({ type: key, label, amount: aAmt, dueDate: aDate, loggedAt: now, status: 'active' });
+    }
+    // Same date, amount changed, no logged payment for it -> just a data correction, not a payment.
+  }
+  return log;
+}
+
 // ---------------- action handlers ----------------
 async function handleSaveVehicle(id) {
   const before = vehicles.find(v => v.id === id);
   const after = readVehicleFormFromDOM(id);
-  // Log one spend entry per (compliance type, due date). Editing the same
-  // due date more than once before it's final just replaces that entry
-  // instead of stacking a new one — this is what previously made Annual
-  // Spend inflate every time a date got tweaked and re-saved.
-  let log = (before && before.paymentLog || []).slice();
-  for (const { key, label } of COMPLIANCE_TYPES) {
-    const b = before ? before[key] : null;
-    const a = after[key];
-    if (!a || a.amount == null || !a.dueDate) continue;
-    const unchanged = b && b.dueDate === a.dueDate && b.amount === a.amount;
-    if (unchanged) continue;
-    log = log.filter(e => !(e.type === key && e.dueDate === a.dueDate));
-    log.push({ type: key, label, amount: a.amount, dueDate: a.dueDate, loggedAt: new Date().toISOString() });
-  }
-  after.paymentLog = log;
+  after.paymentLog = applyPaymentLogChanges(before, after);
   await saveVehicleRemote(after);
   haptic(18);
   ui.justSaved[id] = true;
@@ -502,13 +591,30 @@ async function handleResetPaymentLog(id) {
   for (const { key, label } of COMPLIANCE_TYPES) {
     const data = v[key];
     if (data && data.amount != null && data.dueDate) {
-      freshLog.push({ type: key, label, amount: data.amount, dueDate: data.dueDate, loggedAt: new Date().toISOString() });
+      freshLog.push({ type: key, label, amount: data.amount, dueDate: data.dueDate, loggedAt: new Date().toISOString(), status: 'active' });
     }
   }
   haptic(18);
   await saveVehicleRemote({ ...v, paymentLog: freshLog });
   delete ui.confirmResetLog[id];
   render();
+}
+async function handleToggleVoidEntry(vehicleId, idx) {
+  const v = vehicles.find(x => x.id === vehicleId);
+  if (!v || !v.paymentLog || !v.paymentLog[idx]) return;
+  const log = v.paymentLog.map(e => ({ ...e }));
+  const e = log[idx];
+  if (e.status === 'void') {
+    e.status = 'active';
+    delete e.voidedAt;
+    delete e.voidReason;
+  } else {
+    e.status = 'void';
+    e.voidedAt = new Date().toISOString();
+    e.voidReason = 'Voided manually in Recheck';
+  }
+  haptic(18);
+  await saveVehicleRemote({ ...v, paymentLog: log });
 }
 async function handleArchiveToggle(id) {
   const v = vehicles.find(x => x.id === id);
@@ -763,6 +869,12 @@ root.addEventListener('click', (e) => {
   else if (action === 'reset-log-cancel') { delete ui.confirmResetLog[id]; render(); }
   else if (action === 'reset-log-confirm') { handleResetPaymentLog(id); }
   else if (action === 'open-spend') { navigateTo('spend'); }
+  else if (action === 'open-recheck') { navigateTo('recheck'); }
+  else if (action === 'open-spend-months') { navigateTo('spend-months'); }
+  else if (action === 'open-month') { navigateTo('month-detail', { monthKey: btn.dataset.month }); }
+  else if (action === 'open-spend-vehicles') { navigateTo('spend-vehicles'); }
+  else if (action === 'open-vehicle-spend') { navigateTo('vehicle-spend', { vehicleId: id }); }
+  else if (action === 'toggle-void') { handleToggleVoidEntry(id, Number(btn.dataset.idx)); }
   else if (action === 'share-dues') { handleShareDues(); }
   else if (action === 'enable-notifications') { ui.menuOpen = false; handleEnableNotifications(); }
   else if (action === 'pay-due') { handlePayDue(btn.dataset.vehicleNo, btn); }
@@ -1091,6 +1203,7 @@ function computeAnnualSpend(year) {
     if (v.deletedAt) continue;
     let vTotal = 0;
     for (const entry of (v.paymentLog || [])) {
+      if (entry.status === 'void') continue;
       const entryYear = new Date(entry.loggedAt).getFullYear();
       if (entryYear !== year) continue;
       vTotal += entry.amount;
@@ -1122,25 +1235,264 @@ function renderFilterTotalBanner(level) {
   const label = level === 'overdue' ? 'Overdue' : 'Due within 30 days';
   return `<div class="filter-total-banner${level === 'overdue' ? ' overdue' : ''}">💰 ${label}: <strong>${formatINR(total)}</strong> across ${count} item${count === 1 ? '' : 's'}</div>`;
 }
+// Entries worth a second look: voided, amount-edited, saved again for the same period,
+// or several active payments of the same type for one vehicle in one month.
+function computeRecheckItems() {
+  const items = [];
+  for (const v of vehicles) {
+    if (v.deletedAt) continue;
+    const log = v.paymentLog || [];
+    const groups = {};
+    log.forEach((e, i) => {
+      if (e.status === 'void') return;
+      const k = `${e.type}|${monthKeyFromIso(e.loggedAt)}`;
+      (groups[k] = groups[k] || []).push(i);
+    });
+    log.forEach((e, i) => {
+      const reasons = [];
+      if (e.status === 'void') reasons.push({ text: `Voided — ${e.voidReason || 'reversed'}`, void: true });
+      if (e.edits > 0) reasons.push({ text: `Amount edited ${e.edits}×` });
+      if (e.resaves > 0) reasons.push({ text: `Saved again ${e.resaves}× for the same due date` });
+      const g = groups[`${e.type}|${monthKeyFromIso(e.loggedAt)}`];
+      if (e.status !== 'void' && g && g.length > 1) reasons.push({ text: `${g.length} ${e.label} payments logged this month` });
+      if (reasons.length) items.push({ vehicle: v, idx: i, entry: e, reasons });
+    });
+  }
+  items.sort((a, b) => new Date(b.entry.loggedAt) - new Date(a.entry.loggedAt));
+  return items;
+}
 function renderSpendScreen(anim = '') {
   const year = new Date().getFullYear();
-  const { total, byType, perVehicle } = computeAnnualSpend(year);
+  const { total, byType } = computeAnnualSpend(year);
+  const recheckCount = computeRecheckItems().length;
   const typeRows = COMPLIANCE_TYPES.map(({ key, label }) => `
     <div class="spend-row"><span>${label}</span><span>${formatINR(byType[key] || 0)}</span></div>`).join('');
-  const vehicleRows = perVehicle.length === 0
-    ? `<div class="empty-state" style="padding:20px 8px">No logged payments yet this year — totals fill in as you save renewed dates and amounts.</div>`
-    : perVehicle.map(p => `<div class="spend-row"><span>${escapeHtml(p.vehicleNo)}</span><span>${formatINR(p.total)}</span></div>`).join('');
+  const monthsWithData = computeMonthlySpend().filter(m => m.count > 0).length;
+  const vehiclesWithSpend = computeLifetimeByVehicle().filter(p => p.total > 0).length;
   return `<div class="wrap ${anim}">
     ${renderScreenHeader(`💰 Annual Spend`, `${year} · fleet-wide`)}
     <div class="spend-total-card">
       <div class="spend-total-label">Total logged this year</div>
       <div class="spend-total-num">${formatINR(total)}</div>
     </div>
-    <div class="spend-section-title">By type</div>
+    <button type="button" class="btn btn-outline recheck-nav-btn" data-action="open-recheck">
+      <span>🔍 Recheck</span>
+      <span class="recheck-badge${recheckCount === 0 ? ' zero' : ''}">${recheckCount}</span>
+      <span class="docs-nav-chevron">›</span>
+    </button>
+    <div class="spend-section-title">Breakdowns</div>
+    <div class="spend-tile-grid">
+      <button type="button" class="folder-tile" data-action="open-spend-months">
+        <div class="folder-icon">📅</div>
+        <div class="folder-info">
+          <div class="folder-label">By month</div>
+          <div class="folder-hint">${monthsWithData} month${monthsWithData === 1 ? '' : 's'} with payments · tap a month for vehicles</div>
+        </div>
+        <div class="folder-chevron">›</div>
+      </button>
+      <button type="button" class="folder-tile" data-action="open-spend-vehicles">
+        <div class="folder-icon">🚛</div>
+        <div class="folder-info">
+          <div class="folder-label">By vehicle</div>
+          <div class="folder-hint">Lifetime spend · ${vehiclesWithSpend} vehicle${vehiclesWithSpend === 1 ? '' : 's'} with payments</div>
+        </div>
+        <div class="folder-chevron">›</div>
+      </button>
+    </div>
+    <div class="spend-section-title">By type · ${year}</div>
     <div class="spend-card">${typeRows}</div>
-    <div class="spend-section-title">By vehicle</div>
-    <div class="spend-card">${vehicleRows}</div>
-    <p class="spend-note">Tracking starts from when this update went live — amounts paid before that aren't in your original sheet, so they can't be counted retroactively. From now on, every saved renewal adds to these totals automatically.</p>
+    <p class="spend-note">Each payment is tied to its vehicle, type and due date, and counted in the month it was saved. Saving the same renewal twice doesn't add it twice, and moving a due date back removes that payment from the totals (it stays visible under Recheck). Amounts paid before tracking began aren't included.</p>
+  </div>`;
+}
+
+// ---- spend drill-down screens: By month -> month detail, By vehicle -> vehicle transactions ----
+function formatMonthKey(key) {
+  const [y, m] = key.split('-').map(Number);
+  return `${MONTH_FULL[m - 1]} ${y}`;
+}
+function collectActiveEntries() {
+  const out = [];
+  for (const v of vehicles) {
+    if (v.deletedAt) continue;
+    (v.paymentLog || []).forEach((entry, idx) => {
+      if (entry.status !== 'void') out.push({ vehicle: v, idx, entry });
+    });
+  }
+  return out;
+}
+// Every month (newest first) from the earliest payment — or January of this year, whichever is
+// earlier — through the current month. Months with no payments show as ₹0.
+function computeMonthlySpend() {
+  const map = {};
+  for (const { entry } of collectActiveEntries()) {
+    const k = monthKeyFromIso(entry.loggedAt);
+    const m = map[k] || (map[k] = { key: k, total: 0, count: 0 });
+    m.total += entry.amount;
+    m.count += 1;
+  }
+  const now = new Date();
+  const curKey = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
+  const janKey = `${now.getFullYear()}-01`;
+  const existing = Object.keys(map).sort();
+  const startKey = existing.length && existing[0] < janKey ? existing[0] : janKey;
+  let [y, m] = startKey.split('-').map(Number);
+  while (`${y}-${pad2(m)}` <= curKey) {
+    const k = `${y}-${pad2(m)}`;
+    if (!map[k]) map[k] = { key: k, total: 0, count: 0 };
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return Object.values(map).sort((a, b) => b.key.localeCompare(a.key));
+}
+function computeLifetimeByVehicle() {
+  const rows = vehicles.filter(v => !v.deletedAt).map(v => {
+    let total = 0, count = 0;
+    for (const e of (v.paymentLog || [])) {
+      if (e.status === 'void') continue;
+      total += e.amount;
+      count += 1;
+    }
+    return { vehicle: v, total, count };
+  });
+  rows.sort((a, b) => b.total - a.total || a.vehicle.vehicleNo.localeCompare(b.vehicle.vehicleNo));
+  return rows;
+}
+function renderTxLine(entry) {
+  const isVoid = entry.status === 'void';
+  return `<div class="tx-line${isVoid ? ' voided' : ''}">
+    <div class="tx-line-main">
+      <span>${escapeHtml(entry.label)}${isVoid ? ' · not counted' : ''}</span>
+      <span class="tx-line-sub">Paid through ${escapeHtml(formatDateDisplay(entry.dueDate) || '—')} · saved ${escapeHtml(formatDateTimeDisplay(entry.loggedAt))}</span>
+    </div>
+    <span class="tx-line-amt">${formatINR(entry.amount)}</span>
+  </div>`;
+}
+function renderSpendMonthsScreen(anim = '') {
+  const months = computeMonthlySpend();
+  const grand = months.reduce((s, m) => s + m.total, 0);
+  const tiles = months.map(m => `
+    <button type="button" class="folder-tile month-tile${m.total === 0 ? ' zero' : ''}" data-action="open-month" data-month="${m.key}">
+      <div class="folder-info">
+        <div class="folder-label">${formatMonthKey(m.key)}</div>
+        <div class="folder-hint">${m.count ? `${m.count} payment${m.count > 1 ? 's' : ''}` : 'No payments'}</div>
+      </div>
+      <div class="spend-tile-amount${m.total === 0 ? ' zero' : ''}">${formatINR(m.total)}</div>
+      <div class="folder-chevron">›</div>
+    </button>`).join('');
+  return `<div class="wrap ${anim}">
+    ${renderScreenHeader('📅 By month', 'Tap a month to see its vehicles')}
+    <div class="spend-total-card">
+      <div class="spend-total-label">Total across these months</div>
+      <div class="spend-total-num">${formatINR(grand)}</div>
+    </div>
+    <div class="spend-tile-grid">${tiles}</div>
+  </div>`;
+}
+function renderMonthDetailScreen(monthKey, anim = '') {
+  const byVehicle = {};
+  for (const { vehicle, entry } of collectActiveEntries()) {
+    if (monthKeyFromIso(entry.loggedAt) !== monthKey) continue;
+    const g = byVehicle[vehicle.id] || (byVehicle[vehicle.id] = { vehicle, total: 0, entries: [] });
+    g.total += entry.amount;
+    g.entries.push(entry);
+  }
+  const groups = Object.values(byVehicle).sort((a, b) => b.total - a.total);
+  const monthTotal = groups.reduce((s, g) => s + g.total, 0);
+  const cards = groups.map(g => `
+    <div class="tx-card">
+      <div class="tx-card-head">
+        ${renderPlate(g.vehicle.vehicleNo)}
+        <span class="recheck-amount">${formatINR(g.total)}</span>
+      </div>
+      ${g.entries.sort((a, b) => new Date(b.loggedAt) - new Date(a.loggedAt)).map(renderTxLine).join('')}
+    </div>`).join('');
+  return `<div class="wrap ${anim}">
+    ${renderScreenHeader(`📅 ${formatMonthKey(monthKey)}`, `${groups.length} vehicle${groups.length === 1 ? '' : 's'}`)}
+    <div class="spend-total-card">
+      <div class="spend-total-label">Spent this month</div>
+      <div class="spend-total-num">${formatINR(monthTotal)}</div>
+    </div>
+    ${groups.length === 0
+      ? `<div class="empty-state">No payments were saved in this month.</div>`
+      : `<div class="recheck-list">${cards}</div>`}
+  </div>`;
+}
+function renderSpendVehiclesScreen(anim = '') {
+  const rows = computeLifetimeByVehicle();
+  const grand = rows.reduce((s, r) => s + r.total, 0);
+  const tiles = rows.map(r => `
+    <button type="button" class="folder-tile vehicle-tile${r.total === 0 ? ' zero' : ''}" data-action="open-vehicle-spend" data-id="${r.vehicle.id}">
+      ${renderPlate(r.vehicle.vehicleNo)}
+      <div class="folder-info">
+        <div class="folder-hint">${r.count ? `${r.count} payment${r.count > 1 ? 's' : ''}` : 'No payments'}${r.vehicle.active ? '' : ' · archived'}</div>
+      </div>
+      <div class="spend-tile-amount${r.total === 0 ? ' zero' : ''}">${formatINR(r.total)}</div>
+      <div class="folder-chevron">›</div>
+    </button>`).join('');
+  return `<div class="wrap ${anim}">
+    ${renderScreenHeader('🚛 By vehicle', 'Lifetime spend — everything logged so far')}
+    <div class="spend-total-card">
+      <div class="spend-total-label">Lifetime total</div>
+      <div class="spend-total-num">${formatINR(grand)}</div>
+    </div>
+    ${rows.length === 0 ? `<div class="empty-state">No vehicles yet.</div>` : `<div class="spend-tile-grid">${tiles}</div>`}
+  </div>`;
+}
+function renderVehicleSpendScreen(vehicleId, anim = '') {
+  const v = vehicles.find(x => x.id === vehicleId);
+  if (!v) return `<div class="wrap ${anim}">${renderScreenHeader('Vehicle not found')}</div>`;
+  const log = (v.paymentLog || []).slice().sort((a, b) => new Date(b.loggedAt) - new Date(a.loggedAt));
+  const total = log.reduce((s, e) => s + (e.status === 'void' ? 0 : e.amount), 0);
+  const groups = [];
+  for (const e of log) {
+    const k = monthKeyFromIso(e.loggedAt);
+    let g = groups[groups.length - 1];
+    if (!g || g.key !== k) { g = { key: k, total: 0, entries: [] }; groups.push(g); }
+    g.entries.push(e);
+    if (e.status !== 'void') g.total += e.amount;
+  }
+  const sections = groups.map(g => `
+    <div class="tx-month-title"><span>${formatMonthKey(g.key)}</span><span>${formatINR(g.total)}</span></div>
+    <div class="tx-card">${g.entries.map(renderTxLine).join('')}</div>`).join('');
+  return `<div class="wrap ${anim}">
+    ${renderScreenHeader('Transactions', v.vehicleNo)}
+    <div class="spend-total-card">
+      <div class="spend-total-label">Lifetime spend</div>
+      <div class="spend-total-num">${formatINR(total)}</div>
+    </div>
+    ${groups.length === 0
+      ? `<div class="empty-state">No payments logged for this vehicle yet.</div>`
+      : sections}
+  </div>`;
+}
+function renderRecheckScreen(anim = '') {
+  const items = computeRecheckItems();
+  const cards = items.map(({ vehicle, idx, entry, reasons }) => {
+    const isVoid = entry.status === 'void';
+    return `<div class="recheck-card${isVoid ? ' voided' : ''}">
+      <div class="recheck-top">
+        ${renderPlate(vehicle.vehicleNo)}
+        <span class="recheck-amount${isVoid ? ' voided' : ''}">${formatINR(entry.amount)}</span>
+      </div>
+      <div class="recheck-meta">
+        ${escapeHtml(entry.label)} · paid through ${escapeHtml(formatDateDisplay(entry.dueDate) || '—')}<br/>
+        Logged ${escapeHtml(formatDateTimeDisplay(entry.loggedAt))}
+        ${entry.lastEditedAt ? `<br/>Amount last edited ${escapeHtml(formatDateTimeDisplay(entry.lastEditedAt))}` : ''}
+        ${entry.lastResavedAt ? `<br/>Saved again ${escapeHtml(formatDateTimeDisplay(entry.lastResavedAt))}` : ''}
+        ${isVoid && entry.voidedAt ? `<br/>Voided ${escapeHtml(formatDateTimeDisplay(entry.voidedAt))}` : ''}
+      </div>
+      <div>${reasons.map(r => `<span class="reason-tag${r.void ? ' void' : ''}">${escapeHtml(r.text)}</span>`).join('')}</div>
+      <div>
+        <button type="button" class="btn ${isVoid ? 'btn-outline' : 'btn-danger-filled'}" data-action="toggle-void" data-id="${vehicle.id}" data-idx="${idx}">${isVoid ? '↻ Count it again' : '✕ Remove from spend'}</button>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="wrap ${anim}">
+    ${renderScreenHeader('🔍 Recheck', 'Payments that may need a second look')}
+    ${items.length === 0
+      ? `<div class="empty-state">Nothing to recheck — no repeated saves, edits or reversed dates.</div>`
+      : `<div class="recheck-list">${cards}</div>`}
+    <p class="spend-note">Voided payments are not counted in Annual Spend. Use "Remove from spend" for a payment that shouldn't count (for example a test), or "Count it again" to put a voided one back.</p>
   </div>`;
 }
 
