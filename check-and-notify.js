@@ -10,16 +10,26 @@ const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 
+// `optional` types only count for vehicles that have switched them on (Permit add-on).
 const COMPLIANCE_TYPES = [
   { key: 'tax', label: 'RTO Tax' },
   { key: 'insurance', label: 'Insurance' },
   { key: 'fitness', label: 'Fitness Certificate' },
   { key: 'puc', label: 'PUC Certificate' },
+  { key: 'permit', label: 'Permit', optional: true },
 ];
 
 // How many days ahead of a due date to start alerting. Overdue items always
 // alert regardless of this number.
 const ALERT_WINDOW_DAYS = 7;
+
+function typesFor(vehicle) {
+  return COMPLIANCE_TYPES.filter((t) => !t.optional || (vehicle.permit && vehicle.permit.enabled));
+}
+
+function vehicleLabel(v) {
+  return v.name ? `${v.name} (${v.vehicleNo})` : v.vehicleNo;
+}
 
 function daysFromToday(dateStr) {
   const today = new Date();
@@ -32,6 +42,7 @@ function daysFromToday(dateStr) {
 function getAlert(vehicle, key) {
   if (key === 'tax' && vehicle.tax && vehicle.tax.isLifetime) return null;
   const data = vehicle[key] || {};
+  if (data.hold) return null; // on hold: deliberately not being paid, so no alert
   if (!data.dueDate) return null;
   const diff = daysFromToday(data.dueDate);
   if (diff < 0) return { level: 'overdue', days: diff };
@@ -46,13 +57,13 @@ async function main() {
   for (const doc of snap.docs) {
     const v = doc.data();
     if (!v.active || v.deletedAt) continue;
-    for (const { key, label } of COMPLIANCE_TYPES) {
+    for (const { key, label } of typesFor(v)) {
       const alert = getAlert(v, key);
       if (!alert) continue;
       const desc = alert.level === 'overdue'
         ? `${label} overdue by ${Math.abs(alert.days)}d`
         : `${label} due in ${alert.days}d`;
-      lines.push(`${v.vehicleNo} — ${desc}`);
+      lines.push(`${vehicleLabel(v)} — ${desc}`);
     }
   }
 
