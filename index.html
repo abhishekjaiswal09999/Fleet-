@@ -69,6 +69,9 @@
   .addon-section .addon-toggle { margin-bottom: 0; font-size: 12px; font-weight: 600; color: #C3CAD4; }
   .addon-section .compliance-block { margin-top: 9px; }
   .addon-hint { font-weight: 500; color: #5B6472; font-size: 11px; }
+  .hold-btn { background: transparent; border: 1px solid #3A4553; color: #8A93A3; border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap; }
+  .hold-btn.active { background: rgba(155,140,255,0.16); border-color: rgba(155,140,255,0.5); color: #9B8CFF; }
+  .compliance-block.on-hold .row-fields { opacity: 0.5; }
   .row-fields { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .quick-btn, .btn { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; font-weight: 600; cursor: pointer; font-family: inherit; }
   .btn:disabled { opacity: 0.6; cursor: default; }
@@ -282,7 +285,7 @@ const COMPLIANCE_TYPES = [
   { key: 'puc', label: 'PUC Certificate', short: 'PUC', dot: 'PU' },
   { key: 'permit', label: 'Permit', short: 'Permit', dot: 'PR', optional: true },
 ];
-const STATUS_RANK = { overdue: 0, soon: 1, upcoming: 2, ok: 3, lifetime: 4, unset: 5 };
+const STATUS_RANK = { overdue: 0, soon: 1, upcoming: 2, ok: 3, lifetime: 4, unset: 5, hold: 6 };
 
 function typesFor(vehicle) {
   return COMPLIANCE_TYPES.filter(t => !t.optional || (vehicle && vehicle.permit && vehicle.permit.enabled));
@@ -332,6 +335,8 @@ function escapeHtml(s) {
 function getComplianceStatus(vehicle, key) {
   if (key === 'tax' && vehicle.tax.isLifetime) return { level: 'lifetime', label: 'Lifetime', days: null };
   const data = vehicle[key] || {};
+  // On hold = deliberately not paying/tracking for now: never overdue, due, "missing", alerted or logged.
+  if (data.hold) return { level: 'hold', label: 'On hold', days: null };
   if (!data.dueDate) return { level: 'unset', label: 'Not set', days: null };
   const diff = daysFromToday(data.dueDate);
   if (diff < 0) return { level: 'overdue', label: `${Math.abs(diff)}d overdue`, days: diff };
@@ -342,15 +347,17 @@ function getComplianceStatus(vehicle, key) {
 }
 function getVehicleWorstStatus(vehicle) {
   let worst = null;
+  let anyHold = false;
   for (const { key, label } of typesFor(vehicle)) {
     const s = getComplianceStatus(vehicle, key);
+    if (s.level === 'hold') { anyHold = true; continue; }
     if (s.level === 'unset') continue;
     if (!worst || STATUS_RANK[s.level] < STATUS_RANK[worst.level] ||
         (STATUS_RANK[s.level] === STATUS_RANK[worst.level] && (s.days ?? Infinity) < (worst.days ?? Infinity))) {
       worst = { ...s, typeLabel: label };
     }
   }
-  return worst || { level: 'unset', label: 'No dates set', days: null, typeLabel: null };
+  return worst || (anyHold ? { level: 'hold', label: 'On hold', days: null, typeLabel: null } : { level: 'unset', label: 'No dates set', days: null, typeLabel: null });
 }
 function hasMissingInfo(v) {
   return typesFor(v).some(({ key }) => getComplianceStatus(v, key).level === 'unset');
@@ -362,6 +369,7 @@ function statusColors(level) {
     case 'upcoming': return { fg: '#5B9FE3', bg: 'rgba(91,159,227,0.14)', border: 'rgba(91,159,227,0.35)' };
     case 'ok': return { fg: '#3FB27F', bg: 'rgba(63,178,127,0.14)', border: 'rgba(63,178,127,0.35)' };
     case 'lifetime': return { fg: '#3FB27F', bg: 'rgba(63,178,127,0.14)', border: 'rgba(63,178,127,0.35)' };
+    case 'hold': return { fg: '#9B8CFF', bg: 'rgba(155,140,255,0.14)', border: 'rgba(155,140,255,0.35)' };
     default: return { fg: '#8A93A3', bg: 'rgba(139,147,163,0.14)', border: 'rgba(139,147,163,0.30)' };
   }
 }
@@ -530,6 +538,7 @@ function readVehicleFormFromDOM(id) {
   const existing = vehicles.find(v => v.id === id) || { id, active: true, documents: [] };
   const g = (f) => document.getElementById(`f_${id}_${f}`);
   const isLT = g('tax_lifetime').checked;
+  const holdOf = (k) => !!(g(k + '_hold') && g(k + '_hold').dataset.hold === '1');
   return {
     id: existing.id,
     active: existing.active,
@@ -540,10 +549,10 @@ function readVehicleFormFromDOM(id) {
     notes: g('notes').value.trim(),
     tax: isLT
       ? { isLifetime: true, dueDate: null, amount: null, lifetimeNote: g('tax_note').value.trim() }
-      : { isLifetime: false, dueDate: g('tax_date').value || null, amount: g('tax_amount').value === '' ? null : Number(g('tax_amount').value), lifetimeNote: '' },
-    insurance: { dueDate: g('insurance_date').value || null, amount: g('insurance_amount').value === '' ? null : Number(g('insurance_amount').value) },
-    fitness: { dueDate: g('fitness_date').value || null, amount: g('fitness_amount').value === '' ? null : Number(g('fitness_amount').value) },
-    puc: { dueDate: g('puc_date').value || null, amount: g('puc_amount').value === '' ? null : Number(g('puc_amount').value) },
+      : { isLifetime: false, dueDate: g('tax_date').value || null, amount: g('tax_amount').value === '' ? null : Number(g('tax_amount').value), lifetimeNote: '', hold: holdOf('tax') },
+    insurance: { dueDate: g('insurance_date').value || null, amount: g('insurance_amount').value === '' ? null : Number(g('insurance_amount').value), hold: holdOf('insurance') },
+    fitness: { dueDate: g('fitness_date').value || null, amount: g('fitness_amount').value === '' ? null : Number(g('fitness_amount').value), hold: holdOf('fitness') },
+    puc: { dueDate: g('puc_date').value || null, amount: g('puc_amount').value === '' ? null : Number(g('puc_amount').value), hold: holdOf('puc') },
     // Permit fields are always read (the block is only hidden, not removed) so switching the
     // add-on off and on again doesn't lose what was typed.
     permit: {
@@ -552,6 +561,7 @@ function readVehicleFormFromDOM(id) {
       amount: g('permit_amount').value === '' ? null : Number(g('permit_amount').value),
       number: g('permit_number').value.trim(),
       type: g('permit_type').value || 'National',
+      hold: holdOf('permit'),
     },
   };
 }
@@ -572,7 +582,7 @@ function applyPaymentLogChanges(before, after) {
   for (const { key, label } of typesFor(after)) {
     const b = before ? before[key] : null;
     const a = after[key];
-    if (!a) continue;
+    if (!a || a.hold) continue; // on hold = not being paid, so nothing to log
     const bDate = b ? (b.dueDate || null) : null;
     const bAmt = b && b.amount != null ? b.amount : null;
     const aDate = a.dueDate || null;
@@ -634,7 +644,7 @@ async function handleResetPaymentLog(id) {
   const freshLog = [];
   for (const { key, label } of typesFor(v)) {
     const data = v[key];
-    if (data && data.amount != null && data.dueDate) {
+    if (data && !data.hold && data.amount != null && data.dueDate) {
       freshLog.push({ type: key, label, amount: data.amount, dueDate: data.dueDate, loggedAt: new Date().toISOString(), status: 'active' });
     }
   }
@@ -848,7 +858,7 @@ function csvEscape(value) {
   return s;
 }
 function exportCsv() {
-  const headers = ['Vehicle No','Vehicle Name','Chassis No','Status','Current Status','Tax Due Date','Tax Amount','Tax Lifetime','Insurance Due Date','Insurance Amount','Fitness Due Date','Fitness Amount','PUC Due Date','PUC Amount','Permit Due Date','Permit Amount','Permit Type','Permit No','Notes'];
+  const headers = ['Vehicle No','Vehicle Name','Chassis No','Status','Current Status','Tax Due Date','Tax Amount','Tax Lifetime','Insurance Due Date','Insurance Amount','Fitness Due Date','Fitness Amount','PUC Due Date','PUC Amount','Permit Due Date','Permit Amount','Permit Type','Permit No','On Hold','Notes'];
   const rows = vehicles.filter(v => !v.deletedAt).map(v => {
     const worst = getVehicleWorstStatus(v);
     const pm = v.permit && v.permit.enabled ? v.permit : null;
@@ -871,6 +881,7 @@ function exportCsv() {
       pm ? (pm.amount ?? '') : '',
       pm ? (pm.type || '') : '',
       pm ? (pm.number || '') : '',
+      typesFor(v).filter(t => v[t.key] && v[t.key].hold).map(t => t.short).join('; '),
       v.notes || '',
     ].map(csvEscape).join(',');
   });
@@ -905,6 +916,7 @@ root.addEventListener('click', (e) => {
   const action = btn.dataset.action;
   const id = btn.dataset.id;
   if (action === 'toggle-expand') { handleToggleExpand(id, btn.dataset.section || ''); }
+  else if (action === 'toggle-hold') { toggleHold(btn); }
   else if (action === 'toggle-section') { const k = btn.dataset.key; ui.collapsedSections.has(k) ? ui.collapsedSections.delete(k) : ui.collapsedSections.add(k); render(); }
   else if (action === 'toggle-filter') { ui.filter = (ui.filter === btn.dataset.filter) ? 'all' : btn.dataset.filter; render(); }
   else if (action === 'toggle-add') { ui.addOpen = !ui.addOpen; ui.addError=''; render(); }
@@ -991,16 +1003,39 @@ function renderStatBlock(label, value, color, filterKey) {
   return `<button class="stat-block${isActive ? ' active' : ''}" style="border-top:3px solid ${color}${isActive ? `;border-color:${color}` : ''}" data-action="toggle-filter" data-filter="${filterKey}">
     <div class="stat-num">${value}</div><div class="stat-label">${label}</div></button>`;
 }
+// Hold toggle shown in each compliance block's header. It flips in place (no re-render, so
+// unsaved edits aren't lost) and is saved with "Save changes", like the dates and amounts.
+function renderHoldBtn(id, key, data) {
+  const held = !!(data && data.hold);
+  const live = getComplianceStatus({ [key]: { ...(data || {}), hold: false, isLifetime: false } }, key);
+  return `<button type="button" id="f_${id}_${key}_hold" class="hold-btn${held ? ' active' : ''}" data-action="toggle-hold" data-id="${id}" data-field="${key}" data-hold="${held ? 1 : 0}" data-live-level="${live.level}" data-live-label="${escapeHtml(live.label)}" title="Put on hold: not counted as due or overdue and no alerts, until you resume">${held ? '▶ Resume' : '⏸ Hold'}</button>`;
+}
+function toggleHold(btn) {
+  const on = btn.dataset.hold !== '1';
+  btn.dataset.hold = on ? '1' : '0';
+  btn.textContent = on ? '▶ Resume' : '⏸ Hold';
+  btn.classList.toggle('active', on);
+  const block = btn.closest('.compliance-block');
+  if (block) {
+    block.classList.toggle('on-hold', on);
+    const pill = block.querySelector('.compliance-head .status-pill');
+    if (pill) pill.outerHTML = renderStatusPill(on ? { level: 'hold', label: 'On hold' } : { level: btn.dataset.liveLevel, label: btn.dataset.liveLabel });
+  }
+  haptic(12);
+}
 function renderTaxField(vehicle, id) {
   const isLT = id in lifetimeOverride ? lifetimeOverride[id] : (vehicle ? vehicle.tax.isLifetime : false);
   const dueDate = vehicle && !isLT ? vehicle.tax.dueDate : null;
   const amount = vehicle && !isLT ? vehicle.tax.amount : null;
   const note = vehicle && isLT ? vehicle.tax.lifetimeNote : '';
-  const status = isLT ? { level: 'lifetime', label: 'Lifetime' } : getComplianceStatus({ tax: { isLifetime:false, dueDate: dueDate } }, 'tax');
-  return `<div class="compliance-block">
+  const taxData = vehicle && !isLT ? vehicle.tax : null;
+  const status = isLT ? { level: 'lifetime', label: 'Lifetime' } : getComplianceStatus({ tax: { isLifetime:false, dueDate: dueDate, hold: !!(taxData && taxData.hold) } }, 'tax');
+  const taxHeld = !isLT && !!(taxData && taxData.hold);
+  return `<div class="compliance-block${taxHeld ? ' on-hold' : ''}">
     <div class="compliance-head"><span class="compliance-label">RTO Tax</span>
       <div style="display:flex;align-items:center;gap:6px">
         ${!isLT && dueDate ? `<span class="compliance-date-hint">${formatDateDisplay(dueDate)}</span>` : ''}
+        ${!isLT ? renderHoldBtn(id, 'tax', taxData) : ''}
         ${renderStatusPill(status)}
       </div>
     </div>
@@ -1020,10 +1055,11 @@ function renderTaxField(vehicle, id) {
 function renderSimpleField(vehicle, id, typeKey, label, quickMonths, quickLabel) {
   const data = (vehicle && vehicle[typeKey]) || { dueDate: null, amount: null };
   const status = getComplianceStatus({ [typeKey]: data }, typeKey);
-  return `<div class="compliance-block">
+  return `<div class="compliance-block${data.hold ? ' on-hold' : ''}">
     <div class="compliance-head"><span class="compliance-label">${label}</span>
       <div style="display:flex;align-items:center;gap:6px">
         ${data.dueDate ? `<span class="compliance-date-hint">${formatDateDisplay(data.dueDate)}</span>` : ''}
+        ${renderHoldBtn(id, typeKey, data)}
         ${renderStatusPill(status)}
       </div>
     </div>
@@ -1042,10 +1078,11 @@ function renderPermitSection(vehicle, id) {
   const type = p.type || 'National';
   return `<div class="addon-section">
     <label class="checkbox-row addon-toggle"><input type="checkbox" id="f_${id}_permit_enabled" data-permit-checkbox data-id="${id}" ${enabled ? 'checked' : ''}/> 🚚 Track Permit on this vehicle <span class="addon-hint">(goods carriers only)</span></label>
-    <div id="f_${id}_permit_wrap" class="compliance-block" style="display:${enabled ? 'block' : 'none'}">
+    <div id="f_${id}_permit_wrap" class="compliance-block${p.hold ? ' on-hold' : ''}" style="display:${enabled ? 'block' : 'none'}">
       <div class="compliance-head"><span class="compliance-label">Permit</span>
         <div style="display:flex;align-items:center;gap:6px">
           ${p.dueDate ? `<span class="compliance-date-hint">${formatDateDisplay(p.dueDate)}</span>` : ''}
+          ${renderHoldBtn(id, 'permit', p)}
           ${renderStatusPill(status)}
         </div>
       </div>
@@ -1234,7 +1271,7 @@ function renderVehicleRow(v, sectionKey = '') {
       <div class="row-mid">
         ${v.name ? `<div class="row-name">${escapeHtml(v.name)}</div>` : ''}
         ${v.active
-          ? `<div class="row-status" style="color:${wc.fg}">${worst.level === 'unset' ? 'No dates set yet' : `${escapeHtml(worst.typeLabel)} · ${escapeHtml(worst.label)}${worst.amt != null ? ` · ${formatINR(worst.amt)}` : ''}`}</div>`
+          ? `<div class="row-status" style="color:${wc.fg}">${worst.level === 'unset' ? 'No dates set yet' : worst.level === 'hold' ? 'All tracked items on hold' : `${escapeHtml(worst.typeLabel)} · ${escapeHtml(worst.label)}${worst.amt != null ? ` · ${formatINR(worst.amt)}` : ''}`}</div>`
           : `<div class="row-status" style="color:#8A93A3">Archived${v.notes ? ` · ${escapeHtml(v.notes)}` : ''}</div>`
         }
         ${v.chassisNo ? `<div class="row-chassis">Chassis ${escapeHtml(v.chassisNo)}</div>` : ''}
@@ -1837,6 +1874,7 @@ function renderApp(anim = '') {
       <span class="legend-item"><span class="legend-dot" style="background:#5B9FE3"></span>Due ≤ 90d</span>
       <span class="legend-item"><span class="legend-dot" style="background:#3FB27F"></span>On track / Lifetime</span>
       <span class="legend-item"><span class="legend-dot" style="background:#5B6472"></span>Not set</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#9B8CFF"></span>On hold</span>
     </div>
   </div>`;
 }
