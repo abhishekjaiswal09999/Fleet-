@@ -95,6 +95,23 @@
   .loading { min-height: 60vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: #5B6472; font-size: 13px; }
   .spinner { width: 30px; height: 30px; border-radius: 50%; border: 3px solid #2B3441; border-top-color: #F4C41E; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  /* login */
+  .login-wrap { min-height: 80vh; display: flex; align-items: center; justify-content: center; }
+  .login-card { width: 100%; max-width: 380px; background: #1B212B; border: 1px solid #2B3441; border-top: 3px solid #F4C41E; border-radius: 12px; padding: 22px 20px; }
+  .login-card .subtitle { margin-bottom: 14px; }
+  .login-plate { margin-bottom: 14px; }
+  .login-form { display: flex; flex-direction: column; gap: 12px; }
+  .login-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: #8A93A3; font-weight: 600; }
+  .login-form .text-input { padding: 10px 11px; font-size: 14px; }
+  .pw-row { display: flex; gap: 6px; }
+  .login-submit { width: 100%; justify-content: center; padding: 11px; font-size: 13.5px; }
+  .menu-role { padding: 9px 10px 8px; font-size: 12px; color: #8A93A3; border-bottom: 1px solid #2B3441; margin-bottom: 4px; line-height: 1.45; }
+  .menu-role strong { color: #F4C41E; font-size: 13px; }
+  .menu-item.logout { color: #E5484D; }
+  /* view-only accounts: fields stay readable but can't be changed */
+  .expand-body input:disabled, .expand-body select:disabled { opacity: 0.9; cursor: default; -webkit-text-fill-color: #EDEFF2; }
+  .expand-body input[type="checkbox"]:disabled { opacity: 0.6; }
+
   /* tactile press feedback across all interactive elements */
   button, .stat-block, .row-summary, .doc-row-name, .folder-tile, .docs-nav-btn, .menu-item, .menu-btn, .back-btn {
     transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.1s ease, background-color 0.15s ease;
@@ -251,6 +268,33 @@ const vehiclesCol = collection(db, 'vehicles');
 const deviceTokensCol = collection(db, 'deviceTokens');
 try { await enableIndexedDbPersistence(db); } catch (e) { /* multiple tabs open, or unsupported — non-fatal */ }
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB per file
+
+// ---------------- access control ----------------
+// Simple password screen, checked inside the app (no Firebase accounts needed). Two passwords:
+//   one opens a "User" session (view + download only), the other a "Moderator" session (full access).
+// Only SHA-256 hashes are stored here, not the passwords themselves. To change a password, open the
+// app in a browser, press F12 -> Console, run the line below with the new password, and paste the
+// result over the matching hash:
+//   crypto.subtle.digest('SHA-256', new TextEncoder().encode('fleetlog|NEWPASSWORD')).then(b => console.log([...new Uint8Array(b)].map(x => x.toString(16).padStart(2,'0')).join('')))
+// Changing a hash also logs everyone out of that role on their next visit.
+// NOTE: this keeps casual people out and hides the edit controls from View-only users. It is not
+// server-side security: someone technical who opens the page's code can get round it.
+const PW_SALT = 'fleetlog|';
+const ROLE_HASHES = {
+  user: 'c80c47115122254891b78f35ff2a635bf590531b129f219422284474eba089b0',
+  moderator: '3738ac8bcafd7f4b0d32873f3a365ed1fa5489f534cb9dba460ce6623e3cf93a',
+};
+const SESSION_KEY = 'fleetlog.session.v1';
+let authState = 'checking'; // checking | signedOut | signedIn
+let authRole = null; // 'user' | 'moderator'
+const loginUi = { error: '', busy: false };
+function isModerator() { return authRole === 'moderator'; }
+// Every action that changes data or uploads/deletes files. View-only accounts never see these
+// controls, and the click handler refuses them as a second line of defence.
+const EDIT_ACTIONS = ['save-vehicle', 'archive-toggle', 'delete-request', 'delete-cancel', 'delete-confirm',
+  'restore-vehicle', 'delete-forever', 'reset-log-request', 'reset-log-cancel', 'reset-log-confirm',
+  'toggle-add', 'add-submit', 'quick-renew', 'undo-quick-renew', 'toggle-hold', 'toggle-void',
+  'upload-trigger', 'confirm-upload', 'cancel-upload', 'delete-document'];
 
 let messaging = null;
 let notifStatus = 'checking'; // checking | default | granted | denied | unsupported
@@ -481,7 +525,9 @@ function render() {
   const selEnd = active && typeof active.selectionEnd === 'number' ? active.selectionEnd : null;
   const scrollY = root.scrollTop;
 
-  root.innerHTML = loaded ? renderRoot() : '<div class="loading"><div class="spinner"></div><div>Loading your fleet…</div></div>';
+  root.innerHTML = authState === 'signedOut' ? renderLogin()
+    : (authState === 'signedIn' && loaded ? renderRoot() : '<div class="loading"><div class="spinner"></div><div>Loading your fleet…</div></div>');
+  applyViewOnly();
 
   if (activeId) {
     const el = document.getElementById(activeId);
@@ -514,24 +560,110 @@ async function ensureSeeded() {
   }
 }
 let hasPurgedTrash = false;
+let unsubscribeVehicles = null;
 function subscribe() {
-  onSnapshot(vehiclesCol, (snap) => {
+  if (unsubscribeVehicles) return;
+  unsubscribeVehicles = onSnapshot(vehiclesCol, (snap) => {
     vehicles = snap.docs.map(d => d.data());
     loaded = true;
     syncStatus = 'live';
     render();
-    if (!hasPurgedTrash) { hasPurgedTrash = true; purgeOldTrash(); }
+    if (!hasPurgedTrash) { hasPurgedTrash = true; if (isModerator()) purgeOldTrash(); }
   }, (err) => {
     syncStatus = 'error';
     loaded = true;
     render();
   });
 }
-async function saveVehicleRemote(v) { await setDoc(doc(vehiclesCol, v.id), v); }
-async function deleteVehicleRemote(id) { await deleteDoc(doc(vehiclesCol, id)); }
+async function saveVehicleRemote(v) {
+  if (!isModerator()) throw new Error('This login is view-only.');
+  await setDoc(doc(vehiclesCol, v.id), v);
+}
+async function deleteVehicleRemote(id) {
+  if (!isModerator()) throw new Error('This login is view-only.');
+  await deleteDoc(doc(vehiclesCol, id));
+}
+function stopData() {
+  if (unsubscribeVehicles) { unsubscribeVehicles(); unsubscribeVehicles = null; }
+  vehicles = []; loaded = false; hasPurgedTrash = false; syncStatus = 'connecting';
+  view = { screen: 'main' };
+  ui.expanded.clear(); ui.addOpen = false; ui.filter = 'all'; ui.search = ''; ui.menuOpen = false;
+  ui.sectionExpanded = null; ui.collapsedSections.clear();
+  shareState.text = ''; shareState.mode = '';
+}
 
 window.addEventListener('online', () => { if (syncStatus !== 'error') { syncStatus = 'live'; render(); } });
 window.addEventListener('offline', () => { syncStatus = 'offline'; render(); });
+
+// ---------------- login / logout ----------------
+async function hashPassword(pw) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(PW_SALT + pw));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+// The session lives in this browser's storage so nobody has to log in every time. It is only honoured
+// while it still matches the current password hash for that role.
+function loadSession() {
+  try {
+    const sv = JSON.parse(localStorage.getItem(SESSION_KEY));
+    if (sv && ROLE_HASHES[sv.role] && sv.h === ROLE_HASHES[sv.role]) return sv.role;
+  } catch (e) { /* storage blocked or empty — just show the password screen */ }
+  return null;
+}
+function saveSession(role, h) { try { localStorage.setItem(SESSION_KEY, JSON.stringify({ role, h })); } catch (e) { /* works for this visit only */ } }
+function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ } }
+
+async function enterApp(role) {
+  authRole = role;
+  authState = 'signedIn';
+  loginUi.error = ''; loginUi.busy = false;
+  render();
+  // Only the moderator may write, so only the moderator seeds an empty database.
+  if (isModerator()) {
+    try { await ensureSeeded(); } catch (e) { console.error('Seeding failed — check your Firebase config and Firestore rules.', e); }
+  }
+  subscribe();
+}
+async function handleLogin() {
+  const pwEl = document.getElementById('login-password');
+  const password = pwEl ? pwEl.value.trim() : '';
+  if (!password) { loginUi.error = 'Enter the password.'; haptic([15, 40, 15]); render(); return; }
+  loginUi.busy = true; loginUi.error = ''; render();
+  let h;
+  try {
+    h = await hashPassword(password);
+  } catch (e) {
+    loginUi.busy = false; loginUi.error = 'This browser can\u2019t check the password here. Open the app from its https link.';
+    render(); return;
+  }
+  const role = h === ROLE_HASHES.moderator ? 'moderator' : h === ROLE_HASHES.user ? 'user' : null;
+  if (!role) {
+    loginUi.busy = false; loginUi.error = 'Wrong password.';
+    haptic([15, 40, 15]); render(); return;
+  }
+  saveSession(role, h);
+  haptic(20);
+  await enterApp(role);
+}
+function handleSignOut() {
+  haptic(15);
+  clearSession();
+  authRole = null; authState = 'signedOut';
+  stopData();
+  render();
+}
+// View-only accounts: strip every editing control from whatever was just rendered.
+function applyViewOnly() {
+  if (authState !== 'signedIn' || isModerator()) return;
+  const sel = EDIT_ACTIONS.map(a => `[data-action="${a}"]`).join(',') + ',[data-doc-input]';
+  root.querySelectorAll(sel).forEach(el => el.remove());
+  root.querySelectorAll('.expand-body input, .expand-body select, .expand-body textarea').forEach(el => { el.disabled = true; });
+  // "Track Permit on this vehicle" is just clutter for a vehicle that doesn't use it.
+  root.querySelectorAll('.addon-section').forEach(sec => {
+    const cb = sec.querySelector('[data-permit-checkbox]');
+    if (cb && !cb.checked) sec.remove();
+  });
+  root.querySelectorAll('.actions-row').forEach(r => { if (!r.querySelector('button')) r.remove(); });
+}
 
 // ---------------- form reading helpers ----------------
 function readVehicleFormFromDOM(id) {
@@ -730,6 +862,7 @@ function suggestDocName(vehicleNo, file) {
 }
 
 async function handleConfirmUpload(vehicleId, folderKey) {
+  if (!isModerator()) return;
   const key = `${vehicleId}_${folderKey}`;
   const pending = pendingUpload[key];
   if (!pending) return;
@@ -746,7 +879,7 @@ function handleCancelUpload(vehicleId, folderKey) {
 }
 
 async function handleUploadDocument(vehicleId, file, category, displayName) {
-  if (!file) return;
+  if (!file || !isModerator()) return;
   if (file.size > MAX_UPLOAD_BYTES) {
     uploadError[vehicleId] = `"${file.name}" is over 10MB — compress it or take a lighter-quality photo.`;
     haptic([15, 40, 15]);
@@ -915,8 +1048,14 @@ root.addEventListener('click', (e) => {
   haptic(6); // a light tap on every actionable press, native-app style
   const action = btn.dataset.action;
   const id = btn.dataset.id;
+  if (EDIT_ACTIONS.includes(action) && !isModerator()) return; // view-only login
   if (action === 'toggle-expand') { handleToggleExpand(id, btn.dataset.section || ''); }
   else if (action === 'toggle-hold') { toggleHold(btn); }
+  else if (action === 'sign-out') { ui.menuOpen = false; handleSignOut(); }
+  else if (action === 'toggle-pw') {
+    const pw = document.getElementById('login-password');
+    if (pw) { const show = pw.type === 'password'; pw.type = show ? 'text' : 'password'; btn.textContent = show ? 'Hide' : 'Show'; }
+  }
   else if (action === 'toggle-section') { const k = btn.dataset.key; ui.collapsedSections.has(k) ? ui.collapsedSections.delete(k) : ui.collapsedSections.add(k); render(); }
   else if (action === 'toggle-filter') { ui.filter = (ui.filter === btn.dataset.filter) ? 'all' : btn.dataset.filter; render(); }
   else if (action === 'toggle-add') { ui.addOpen = !ui.addOpen; ui.addError=''; render(); }
@@ -957,6 +1096,9 @@ root.addEventListener('click', (e) => {
   else if (action === 'delete-document') { handleDeleteDocument(id, btn.dataset.path); }
   else if (action === 'download-document') { handleDownloadDocument(btn.dataset.url, btn.dataset.name, btn); }
 });
+root.addEventListener('submit', (e) => {
+  if (e.target.id === 'login-form') { e.preventDefault(); handleLogin(); }
+});
 root.addEventListener('change', (e) => {
   if (e.target.matches('[data-lifetime-checkbox]')) {
     lifetimeOverride[e.target.dataset.id] = e.target.checked;
@@ -968,7 +1110,7 @@ root.addEventListener('change', (e) => {
     if (wrap) wrap.style.display = e.target.checked ? 'block' : 'none';
     haptic(8);
   }
-  if (e.target.matches('[data-doc-input]')) {
+  if (e.target.matches('[data-doc-input]') && isModerator()) {
     const file = e.target.files && e.target.files[0];
     if (file) {
       const vehicleId = e.target.dataset.id;
@@ -985,6 +1127,25 @@ root.addEventListener('input', (e) => {
 });
 
 // ---------------- render templates ----------------
+function renderLogin() {
+  return `<div class="wrap login-wrap screen-enter">
+    <div class="login-card">
+      <div class="login-plate">${renderPlate('FLEET LOG')}</div>
+      <h1 class="title">FLEET COMPLIANCE LOG</h1>
+      <p class="subtitle">Enter the password to continue.</p>
+      <form id="login-form" class="login-form" novalidate>
+        <label>Password
+          <div class="pw-row">
+            <input id="login-password" class="text-input" type="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false"/>
+            <button type="button" class="btn btn-outline" data-action="toggle-pw">Show</button>
+          </div>
+        </label>
+        ${loginUi.error ? `<div class="error-text">${escapeHtml(loginUi.error)}</div>` : ''}
+        <button type="submit" class="btn btn-primary login-submit" ${loginUi.busy ? 'disabled' : ''}>${loginUi.busy ? 'Signing in…' : 'Log in'}</button>
+      </form>
+    </div>
+  </div>`;
+}
 function renderSyncBadge() {
   if (syncStatus === 'live') return `<span class="sync-live"><span class="dot"></span>Live</span>`;
   if (syncStatus === 'offline') return `<span class="sync-offline">Offline — will sync when back online</span>`;
@@ -1731,7 +1892,11 @@ function renderRefreshButton() {
 function renderHeaderMenu() {
   return `<div class="menu-wrap">
     <button type="button" class="menu-btn" data-action="toggle-menu" aria-label="More options">⋮</button>
-    ${ui.menuOpen ? `<div class="menu-dropdown">${renderNotifMenuItem()}</div>` : ''}
+    ${ui.menuOpen ? `<div class="menu-dropdown">
+      <div class="menu-role">${isModerator() ? '🛠' : '👁'} Signed in as <strong>${isModerator() ? 'Moderator' : 'User'}</strong><br/>${isModerator() ? 'Full access' : 'View and download only'}</div>
+      ${renderNotifMenuItem()}
+      <button type="button" class="menu-item logout" data-action="sign-out">🚪 Log out</button>
+    </div>` : ''}
   </div>`;
 }
 function renderNotifDebug() {
@@ -1808,7 +1973,7 @@ function renderApp(anim = '') {
     return `<div class="wrap ${anim}">
       <header>
         <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1><div style="display:flex;align-items:center;gap:10px">${renderSyncBadge()}${renderRefreshButton()}${renderHeaderMenu()}</div></div>
-        <p class="subtitle">${activeVehicles.length} active · ${archivedVehicles.length} archived · shared live with everyone who opens this app</p>
+        <p class="subtitle">${activeVehicles.length} active · ${archivedVehicles.length} archived · shared live with everyone signed in</p>
       </header>
       ${statGrid}
       <div class="vehicle-list">
@@ -1839,7 +2004,7 @@ function renderApp(anim = '') {
   return `<div class="wrap ${anim}">
     <header>
       <div class="header-row"><h1 class="title">FLEET COMPLIANCE LOG</h1><div style="display:flex;align-items:center;gap:10px">${renderSyncBadge()}${renderRefreshButton()}${renderHeaderMenu()}</div></div>
-      <p class="subtitle">${activeVehicles.length} active · ${archivedVehicles.length} archived · shared live with everyone who opens this app</p>
+      <p class="subtitle">${activeVehicles.length} active · ${archivedVehicles.length} archived · shared live with everyone signed in</p>
     </header>
     ${statGrid}
     <div class="quick-actions">
@@ -1880,13 +2045,12 @@ function renderApp(anim = '') {
 }
 
 // ---------------- init ----------------
-(async () => {
-  try {
-    await ensureSeeded();
-  } catch (e) {
-    console.error('Seeding failed — check your Firebase config and Firestore rules.', e);
-  }
-  subscribe();
+// A saved session on this device opens the app straight away; otherwise the password screen shows.
+// Nothing is loaded from the database until someone is in.
+(function startup() {
+  const role = loadSession();
+  if (role) enterApp(role);
+  else { authState = 'signedOut'; render(); }
 })();
 </script>
 </body>
