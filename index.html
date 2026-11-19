@@ -72,6 +72,11 @@
   .hold-btn { background: transparent; border: 1px solid #3A4553; color: #8A93A3; border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap; }
   .hold-btn.active { background: rgba(155,140,255,0.16); border-color: rgba(155,140,255,0.5); color: #9B8CFF; }
   .compliance-block.on-hold .row-fields { opacity: 0.5; }
+  .penalty-tick { margin: 0; white-space: nowrap; }
+  .penalty-amt { width: 120px; }
+  .penalty-total { font-size: 11px; color: #F4C41E; margin-top: 6px; }
+  .penalty-help { font-size: 10.5px; color: #8A93A3; margin-top: 4px; }
+  .tx-pen { color: #E5484D; font-weight: 600; }
   .row-fields { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .quick-btn, .btn { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; font-weight: 600; cursor: pointer; font-family: inherit; }
   .btn:disabled { opacity: 0.6; cursor: default; }
@@ -575,9 +580,12 @@ function subscribe() {
     render();
   });
 }
+// Shown in the ⋮ menu so you can tell which copy of the app a phone is really running.
+const APP_VERSION = '19 Nov · penalty on payment';
 async function saveVehicleRemote(v) {
   if (!isModerator()) throw new Error('This login is view-only.');
-  await setDoc(doc(vehiclesCol, v.id), v);
+  // merge: true so a phone still running an older copy can't wipe fields it doesn't know about (permit, name, hold, penalty).
+  await setDoc(doc(vehiclesCol, v.id), v, { merge: true });
 }
 async function deleteVehicleRemote(id) {
   if (!isModerator()) throw new Error('This login is view-only.');
@@ -662,6 +670,7 @@ function applyViewOnly() {
     const cb = sec.querySelector('[data-permit-checkbox]');
     if (cb && !cb.checked) sec.remove();
   });
+  root.querySelectorAll('.penalty-tick').forEach(l => { const c = l.querySelector('input'); if (c && !c.checked) l.remove(); });
   root.querySelectorAll('.actions-row').forEach(r => { if (!r.querySelector('button')) r.remove(); });
 }
 
@@ -680,8 +689,8 @@ function readVehicleFormFromDOM(id) {
     chassisNo: g('chassisNo').value.trim(),
     notes: g('notes').value.trim(),
     tax: isLT
-      ? { isLifetime: true, dueDate: null, amount: null, lifetimeNote: g('tax_note').value.trim() }
-      : { isLifetime: false, dueDate: g('tax_date').value || null, amount: g('tax_amount').value === '' ? null : Number(g('tax_amount').value), lifetimeNote: '', hold: holdOf('tax') },
+      ? { isLifetime: true, dueDate: null, amount: null, lifetimeNote: g('tax_note').value.trim(), hold: false, penalty: null }
+      : { isLifetime: false, dueDate: g('tax_date').value || null, amount: g('tax_amount').value === '' ? null : Number(g('tax_amount').value), lifetimeNote: '', hold: holdOf('tax'), penalty: (g('tax_penalty_on') && g('tax_penalty_on').checked && Number(g('tax_penalty').value) > 0) ? Number(g('tax_penalty').value) : null },
     insurance: { dueDate: g('insurance_date').value || null, amount: g('insurance_amount').value === '' ? null : Number(g('insurance_amount').value), hold: holdOf('insurance') },
     fitness: { dueDate: g('fitness_date').value || null, amount: g('fitness_amount').value === '' ? null : Number(g('fitness_amount').value), hold: holdOf('fitness') },
     puc: { dueDate: g('puc_date').value || null, amount: g('puc_amount').value === '' ? null : Number(g('puc_amount').value), hold: holdOf('puc') },
@@ -737,10 +746,20 @@ function applyPaymentLogChanges(before, after) {
 
     if (aAmt == null || !aDate) continue; // no amount or no date -> nothing to log
 
+    // RTO tax penalty (one-off, e.g. back-taxes on a second-hand vehicle): only applied when a
+    // payment is actually being recorded (due date moved forward). It is added to that tax
+    // payment and then cleared from the form so it never carries over to the next quarter.
+    const paying = aDate !== bDate;
+    const pen = key === 'tax' && paying && a.penalty > 0 ? a.penalty : 0;
+    if (pen > 0) a.penalty = null;
+
     const existing = log.find(e => isActive(e) && e.dueDate === aDate);
     if (existing) {
-      if (existing.amount !== aAmt) {
-        existing.amount = aAmt;
+      const newPen = pen > 0 ? pen : (existing.penalty || 0); // a plain amount correction keeps the penalty already logged
+      const newAmt = aAmt + newPen;
+      if (existing.amount !== newAmt) {
+        existing.amount = newAmt;
+        if (newPen > 0) existing.penalty = newPen; else delete existing.penalty;
         existing.edits = (existing.edits || 0) + 1;
         existing.lastEditedAt = now;
       } else if (aDate !== bDate) {
@@ -749,7 +768,9 @@ function applyPaymentLogChanges(before, after) {
         existing.lastResavedAt = now;
       }
     } else if (aDate !== bDate) {
-      log.push({ type: key, label, amount: aAmt, dueDate: aDate, loggedAt: now, status: 'active' });
+      const entry = { type: key, label, amount: aAmt + pen, dueDate: aDate, loggedAt: now, status: 'active' };
+      if (pen > 0) entry.penalty = pen;
+      log.push(entry);
     }
     // Same date, amount changed, no logged payment for it -> just a data correction, not a payment.
   }
@@ -947,6 +968,17 @@ async function handleCopyChassis(chassisNo, btnEl) {
   haptic(15);
   if (btnEl) setTimeout(() => { btnEl.textContent = originalText; }, 3000);
 }
+// Live hint under the tax row: "₹4,500 tax + ₹1,000 penalty = ₹5,500 will be logged".
+function updatePenaltyTotal(id) {
+  const out = document.getElementById(`f_${id}_tax_penalty_total`);
+  const on = document.getElementById(`f_${id}_tax_penalty_on`);
+  if (!out || !on) return;
+  const tax = Number((document.getElementById(`f_${id}_tax_amount`) || {}).value) || 0;
+  const pen = Number((document.getElementById(`f_${id}_tax_penalty`) || {}).value) || 0;
+  if (!on.checked) { out.style.display = 'none'; return; }
+  out.style.display = 'block';
+  out.textContent = pen > 0 ? `Will log ${formatINR(tax)} tax + ${formatINR(pen)} penalty = ${formatINR(tax + pen)}` : 'Enter the penalty amount';
+}
 function quickRenew(id, field, months, btnEl) {
   const dateInput = document.getElementById(`f_${id}_${field}_date`);
   if (!dateInput) return;
@@ -991,7 +1023,7 @@ function csvEscape(value) {
   return s;
 }
 function exportCsv() {
-  const headers = ['Vehicle No','Vehicle Name','Chassis No','Status','Current Status','Tax Due Date','Tax Amount','Tax Lifetime','Insurance Due Date','Insurance Amount','Fitness Due Date','Fitness Amount','PUC Due Date','PUC Amount','Permit Due Date','Permit Amount','Permit Type','Permit No','On Hold','Notes'];
+  const headers = ['Vehicle No','Vehicle Name','Chassis No','Status','Current Status','Tax Due Date','Tax Amount','Tax Lifetime','Tax Penalty (pending)','Insurance Due Date','Insurance Amount','Fitness Due Date','Fitness Amount','PUC Due Date','PUC Amount','Permit Due Date','Permit Amount','Permit Type','Permit No','On Hold','Notes'];
   const rows = vehicles.filter(v => !v.deletedAt).map(v => {
     const worst = getVehicleWorstStatus(v);
     const pm = v.permit && v.permit.enabled ? v.permit : null;
@@ -1004,6 +1036,7 @@ function exportCsv() {
       v.tax.isLifetime ? '' : (v.tax.dueDate || ''),
       v.tax.isLifetime ? '' : (v.tax.amount ?? ''),
       v.tax.isLifetime ? 'Yes' : 'No',
+      v.tax.isLifetime ? '' : (v.tax.penalty ?? ''),
       v.insurance.dueDate || '',
       v.insurance.amount ?? '',
       v.fitness.dueDate || '',
@@ -1099,10 +1132,24 @@ root.addEventListener('click', (e) => {
 root.addEventListener('submit', (e) => {
   if (e.target.id === 'login-form') { e.preventDefault(); handleLogin(); }
 });
+root.addEventListener('input', (e) => {
+  const m = e.target.id && e.target.id.match(/^f_(.+)_tax_(amount|penalty)$/);
+  if (m) updatePenaltyTotal(m[1]);
+});
 root.addEventListener('change', (e) => {
   if (e.target.matches('[data-lifetime-checkbox]')) {
     lifetimeOverride[e.target.dataset.id] = e.target.checked;
     render();
+  }
+  if (e.target.matches('[data-penalty-checkbox]')) {
+    const id = e.target.dataset.id;
+    const on = e.target.checked;
+    const amt = document.getElementById(`f_${id}_tax_penalty`);
+    if (amt) { amt.style.display = on ? 'block' : 'none'; if (on) amt.focus(); }
+    const help = document.getElementById(`f_${id}_tax_penalty_help`);
+    if (help) help.style.display = on ? 'block' : 'none';
+    updatePenaltyTotal(id);
+    haptic(8);
   }
   if (e.target.matches('[data-permit-checkbox]')) {
     // Show/hide in place (no re-render) so unsaved edits in the other fields aren't wiped.
@@ -1189,6 +1236,7 @@ function renderTaxField(vehicle, id) {
   const dueDate = vehicle && !isLT ? vehicle.tax.dueDate : null;
   const amount = vehicle && !isLT ? vehicle.tax.amount : null;
   const note = vehicle && isLT ? vehicle.tax.lifetimeNote : '';
+  const penalty = vehicle && !isLT ? (vehicle.tax.penalty || 0) : 0;
   const taxData = vehicle && !isLT ? vehicle.tax : null;
   const status = isLT ? { level: 'lifetime', label: 'Lifetime' } : getComplianceStatus({ tax: { isLifetime:false, dueDate: dueDate, hold: !!(taxData && taxData.hold) } }, 'tax');
   const taxHeld = !isLT && !!(taxData && taxData.hold);
@@ -1207,9 +1255,13 @@ function renderTaxField(vehicle, id) {
            <input type="date" id="f_${id}_tax_date" class="date-input" value="${dueDate || ''}"/>
            <input type="number" min="0" id="f_${id}_tax_amount" class="number-input" placeholder="Amount ₹" value="${amount ?? ''}"/>
            <button type="button" class="quick-btn" data-action="quick-renew" data-id="${id}" data-field="tax" data-months="3" data-label="+3 mo">↻ +3 mo</button>
+           <label class="checkbox-row penalty-tick"><input type="checkbox" id="f_${id}_tax_penalty_on" data-penalty-checkbox data-id="${id}" ${penalty > 0 ? 'checked' : ''}/> + Penalty</label>
+           <input type="number" min="0" id="f_${id}_tax_penalty" class="number-input penalty-amt" placeholder="Penalty ₹" value="${penalty > 0 ? penalty : ''}" style="display:${penalty > 0 ? 'block' : 'none'}"/>
            ${vehicle ? `<button type="button" class="btn btn-primary" data-action="pay-due" data-vehicle-no="${escapeHtml(vehicle.vehicleNo)}">🔗 Pay on VAHAN</button>` : ''}
            ${vehicle && vehicle.chassisNo ? `<button type="button" class="btn btn-outline" data-action="copy-chassis" data-chassis="${escapeHtml(vehicle.chassisNo)}">📋 Copy Chassis</button>` : ''}
-         </div>`
+         </div>
+         <div class="penalty-total" id="f_${id}_tax_penalty_total" style="display:${penalty > 0 ? 'block' : 'none'}"></div>
+         <div class="penalty-help" id="f_${id}_tax_penalty_help" style="display:${penalty > 0 ? 'block' : 'none'}">One-time. Added to the tax amount when you press ↻ +3 mo and save, then cleared for next time.</div>`
     }
   </div>`;
 }
@@ -1494,7 +1546,7 @@ function renderTrashRow(v) {
 }
 function computeAnnualSpend(year) {
   const perVehicle = [];
-  const byType = { tax: 0, insurance: 0, fitness: 0, puc: 0, permit: 0 };
+  const byType = { tax: 0, penalty: 0, insurance: 0, fitness: 0, puc: 0, permit: 0 };
   let total = 0;
   for (const v of vehicles) {
     if (v.deletedAt) continue;
@@ -1504,7 +1556,9 @@ function computeAnnualSpend(year) {
       const entryYear = new Date(entry.loggedAt).getFullYear();
       if (entryYear !== year) continue;
       vTotal += entry.amount;
-      byType[entry.type] = (byType[entry.type] || 0) + entry.amount;
+      const pen = entry.type === 'tax' && entry.penalty > 0 ? entry.penalty : 0; // penalty shown on its own line
+      byType[entry.type] = (byType[entry.type] || 0) + entry.amount - pen;
+      byType.penalty += pen;
       total += entry.amount;
     }
     if (vTotal > 0) perVehicle.push({ vehicleNo: v.vehicleNo, total: vTotal });
@@ -1564,7 +1618,8 @@ function renderSpendScreen(anim = '') {
   const recheckCount = computeRecheckItems().length;
   const anyPermit = vehicles.some(v => !v.deletedAt && v.permit && v.permit.enabled);
   const typeRows = COMPLIANCE_TYPES.filter(t => !t.optional || anyPermit || (byType[t.key] || 0) > 0).map(({ key, label }) => `
-    <div class="spend-row"><span>${label}</span><span>${formatINR(byType[key] || 0)}</span></div>`).join('');
+    <div class="spend-row"><span>${label}</span><span>${formatINR(byType[key] || 0)}</span></div>${key === 'tax' && (byType.penalty || 0) > 0 ? `
+    <div class="spend-row"><span>RTO Tax penalty</span><span>${formatINR(byType.penalty)}</span></div>` : ''}`).join('');
   const monthsWithData = computeMonthlySpend().filter(m => m.count > 0).length;
   const vehiclesWithSpend = computeLifetimeByVehicle().filter(p => p.total > 0).length;
   return `<div class="wrap ${anim}">
@@ -1660,7 +1715,7 @@ function renderTxLine(entry) {
   return `<div class="tx-line${isVoid ? ' voided' : ''}">
     <div class="tx-line-main">
       <span>${escapeHtml(entry.label)}${isVoid ? ' · not counted' : ''}</span>
-      <span class="tx-line-sub">Paid through ${escapeHtml(formatDateDisplay(entry.dueDate) || '—')} · saved ${escapeHtml(formatDateTimeDisplay(entry.loggedAt))}</span>
+      <span class="tx-line-sub">Paid through ${escapeHtml(formatDateDisplay(entry.dueDate) || '—')}${entry.penalty > 0 ? ` · <span class="tx-pen">incl. ${formatINR(entry.penalty)} penalty</span>` : ''} · saved ${escapeHtml(formatDateTimeDisplay(entry.loggedAt))}</span>
     </div>
     <span class="tx-line-amt">${formatINR(entry.amount)}</span>
   </div>`;
@@ -1774,7 +1829,7 @@ function renderRecheckScreen(anim = '') {
         <span class="recheck-amount${isVoid ? ' voided' : ''}">${formatINR(entry.amount)}</span>
       </div>
       <div class="recheck-meta">
-        ${escapeHtml(entry.label)} · paid through ${escapeHtml(formatDateDisplay(entry.dueDate) || '—')}<br/>
+        ${escapeHtml(entry.label)} · paid through ${escapeHtml(formatDateDisplay(entry.dueDate) || '—')}${entry.penalty > 0 ? ` · incl. ${formatINR(entry.penalty)} penalty` : ''}<br/>
         Logged ${escapeHtml(formatDateTimeDisplay(entry.loggedAt))}
         ${entry.lastEditedAt ? `<br/>Amount last edited ${escapeHtml(formatDateTimeDisplay(entry.lastEditedAt))}` : ''}
         ${entry.lastResavedAt ? `<br/>Saved again ${escapeHtml(formatDateTimeDisplay(entry.lastResavedAt))}` : ''}
@@ -1893,7 +1948,7 @@ function renderHeaderMenu() {
   return `<div class="menu-wrap">
     <button type="button" class="menu-btn" data-action="toggle-menu" aria-label="More options">⋮</button>
     ${ui.menuOpen ? `<div class="menu-dropdown">
-      <div class="menu-role">${isModerator() ? '🛠' : '👁'} Signed in as <strong>${isModerator() ? 'Moderator' : 'User'}</strong><br/>${isModerator() ? 'Full access' : 'View and download only'}</div>
+      <div class="menu-role">${isModerator() ? '🛠' : '👁'} Signed in as <strong>${isModerator() ? 'Moderator' : 'User'}</strong><br/>${isModerator() ? 'Full access' : 'View and download only'}<br/>App version: ${APP_VERSION}</div>
       ${renderNotifMenuItem()}
       <button type="button" class="menu-item logout" data-action="sign-out">🚪 Log out</button>
     </div>` : ''}
