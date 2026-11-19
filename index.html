@@ -299,7 +299,7 @@ function isModerator() { return authRole === 'moderator'; }
 const EDIT_ACTIONS = ['save-vehicle', 'archive-toggle', 'delete-request', 'delete-cancel', 'delete-confirm',
   'restore-vehicle', 'delete-forever', 'reset-log-request', 'reset-log-cancel', 'reset-log-confirm',
   'toggle-add', 'add-submit', 'quick-renew', 'undo-quick-renew', 'toggle-hold', 'toggle-void',
-  'upload-trigger', 'confirm-upload', 'cancel-upload', 'delete-document'];
+  'upload-trigger', 'confirm-upload', 'cancel-upload', 'delete-document', 'import-register'];
 
 let messaging = null;
 let notifStatus = 'checking'; // checking | default | granted | denied | unsupported
@@ -463,6 +463,87 @@ const SEED_VEHICLES = [
   mkSeedArchived('s25','CG16A2457','22242',3700,'Sold'),
 ];
 
+
+// ---------------- one-time import from the Vehicle Document Register (17 Nov 2026) ----------------
+// Menu → "Import vehicle register". Matches vehicles by number. Safe to run more than once.
+//  • new numbers are added; existing ones get name / chassis filled in if blank
+//  • a due date is only ever moved FORWARD (the later of app vs register wins), never back
+//  • amounts, holds, notes, documents and payment history are never touched
+//  • "SOLD" rows are archived; "Life Time" tax is switched to lifetime
+const REGISTER_IMPORT = [{"no":"CG16CN9692","name":"909","chassis":"01138","sold":false,"tax":"2027-01-31","fitness":"2028-01-05","insurance":"2027-03-03","puc":"2027-10-14","permit":"2026-04-07"},{"no":"CG16A2231","name":"HYWA 10chaka","chassis":"06873","sold":false,"tax":"2026-12-31","fitness":"2027-10-27","insurance":"2027-02-24","puc":"2027-04-13","permit":"2029-10-06"},{"no":"CG16CU6147","name":"HYWA 10chaka","chassis":"G1452","sold":false,"tax":"2027-02-28","fitness":"2028-01-20","insurance":"2027-01-14","puc":"2027-01-20","permit":"2031-03-02"},{"no":"CG16CU9266","name":"HYWA 12chaka","chassis":"K3661","sold":false,"tax":"2026-11-30","fitness":"2028-04-03","insurance":"2027-03-30","puc":"2027-04-03","permit":"2031-04-27"},{"no":"CG16CU4151","name":"HYWA 10chaka","chassis":"G1450","sold":false,"tax":"2027-01-31","fitness":"2027-11-19","insurance":"2026-11-18","puc":"2026-11-19","permit":"2031-02-17"},{"no":"CG16A2014","name":"HYWA 10chaka","chassis":"01460","sold":false,"tax":"2027-01-31","fitness":"2027-10-27","insurance":"2027-01-12","puc":"2027-04-07","permit":"2028-08-23"},{"no":"CG10R0645","name":"HYWA 10chaka","chassis":"07867","sold":true,"tax":null,"fitness":null,"insurance":null,"puc":null,"permit":null},{"no":"CG16CP6968","name":"HYWA 12chaka","chassis":"19628","sold":false,"tax":"2027-02-28","fitness":"2027-12-02","insurance":"2026-12-15","puc":"2026-12-04","permit":"2027-02-24"},{"no":"CG16A2391","name":"HYWA 10chaka","chassis":"02264","sold":false,"tax":"2027-02-28","fitness":"2027-10-27","insurance":"2027-03-26","puc":"2027-04-07","permit":"2030-08-27"},{"no":"CG16CU9237","name":"HYWA 12chaka","chassis":"00716","sold":false,"tax":"2026-12-31","fitness":"2028-02-02","insurance":"2027-03-29","puc":"2027-04-02","permit":"2031-04-27"},{"no":"CG16A2488","name":"909","chassis":"32027","sold":false,"tax":"2027-01-31","fitness":"2027-01-05","insurance":"2027-03-24","puc":"2027-03-28","permit":"2030-08-27"},{"no":"CG16CQ7400","name":"HYWA 12chaka","chassis":"18054","sold":false,"tax":"2027-01-31","fitness":"2026-11-28","insurance":"2026-11-22","puc":"2026-12-04","permit":"2028-01-03"},{"no":"CG15AC3477","name":"Trailer","chassis":"15341","sold":false,"tax":"2026-12-31","fitness":"2026-12-21","insurance":"2027-08-01","puc":"2027-03-11","permit":"2031-01-13"},{"no":"CG16CQ8970","name":"HYWA 12chaka","chassis":"31616","sold":false,"tax":"2027-02-28","fitness":"2027-01-28","insurance":"2026-12-26","puc":"2027-11-11","permit":"2028-05-03"},{"no":"CG16CP4053","name":"Grader","chassis":"00009","sold":false,"tax":"2026-12-31","fitness":"2036-09-14","insurance":"2027-02-26","puc":"2022-09-14","permit":null},{"no":"CG16CT1369","name":"AJAX","chassis":"05832","sold":false,"tax":"2027-01-31","fitness":"2039-12-09","insurance":"2026-11-27","puc":"2025-12-09","permit":null},{"no":"CG16E1570","name":"JCB","chassis":"14832","sold":false,"tax":"2026-12-31","fitness":"2029-10-29","insurance":"2026-08-04","puc":null,"permit":null},{"no":"CG16CR4071","name":"AJAX","chassis":"02438","sold":false,"tax":"2027-01-31","fitness":"2038-08-20","insurance":"2027-08-17","puc":"2024-08-20","permit":null},{"no":"CG16CN3554","name":"JCB","chassis":"21137","sold":false,"tax":"LIFETIME","fitness":"2035-10-15","insurance":"2027-09-03","puc":null,"permit":null},{"no":"CG16CT2685","name":"JCB","chassis":"44438","sold":false,"tax":"LIFETIME","fitness":"2040-01-21","insurance":"2027-01-22","puc":"2026-01-21","permit":null},{"no":"CG16A2458","name":"AJAX","chassis":"21765","sold":false,"tax":"2027-01-31","fitness":"2016-10-29","insurance":"2015-01-09","puc":null,"permit":null},{"no":"CG16CL2846","name":"Grader","chassis":"04770","sold":false,"tax":"2023-12-31","fitness":"2021-02-07","insurance":"2025-07-31","puc":null,"permit":null},{"no":"CG16CT2731","name":"Grader","chassis":"02957","sold":false,"tax":"2026-12-31","fitness":"2027-01-22","insurance":"2026-01-22","puc":"2026-01-22","permit":null},{"no":"CG15AC1901","name":"Tanker","chassis":"29934","sold":false,"tax":"2026-12-31","fitness":"2027-10-25","insurance":"2027-02-02","puc":"2027-04-22","permit":"2031-10-30"},{"no":"CG16A1909","name":"Pickup","chassis":"51885","sold":false,"tax":null,"fitness":"2026-12-16","insurance":"2026-12-06","puc":"2026-03-22","permit":null},{"no":"CG16CK1300","name":"Pickup","chassis":"78857","sold":false,"tax":null,"fitness":"2026-12-10","insurance":"2027-07-30","puc":"2026-06-04","permit":null},{"no":"CG16CU8582","name":"Camper","chassis":"17422","sold":false,"tax":"LIFETIME","fitness":"2028-03-17","insurance":"2027-03-16","puc":"2027-03-17","permit":null},{"no":"CG16CU0680","name":"Ajax","chassis":"07572","sold":false,"tax":"2040-08-26","fitness":"2040-09-29","insurance":"2026-09-25","puc":"2026-09-29","permit":null},{"no":"CG04LP0612","name":"TANKER","chassis":"W1086","sold":false,"tax":"2027-01-31","fitness":"2027-08-24","insurance":"2027-01-10","puc":"2027-02-23","permit":"2027-08-24"},{"no":"CG16CV1599","name":"JCB","chassis":"","sold":false,"tax":null,"fitness":null,"insurance":null,"puc":null,"permit":null}];
+function laterDate(a, b) { if (!b) return a || null; if (!a) return b; return b > a ? b : a; }
+function planRegisterImport() {
+  const norm = (x) => String(x || '').toUpperCase().replace(/\s+/g, '');
+  const byNo = new Map(vehicles.map(v => [norm(v.vehicleNo), v]));
+  const creates = [], updates = [], sold = [];
+  let unchanged = 0;
+  for (const r of REGISTER_IMPORT) {
+    const ex = byNo.get(r.no);
+    if (!ex) {
+      creates.push({
+        id: makeId(), vehicleNo: r.no, name: r.name, chassisNo: r.chassis, active: !r.sold, notes: r.sold ? 'Sold' : '', documents: [], paymentLog: [],
+        tax: r.tax === 'LIFETIME'
+          ? { isLifetime: true, dueDate: null, amount: null, lifetimeNote: 'Lifetime tax', hold: false, penalty: null }
+          : { isLifetime: false, dueDate: r.tax || null, amount: null, lifetimeNote: '', hold: false, penalty: null },
+        insurance: { dueDate: r.insurance || null, amount: null, hold: false },
+        fitness: { dueDate: r.fitness || null, amount: null, hold: false },
+        puc: { dueDate: r.puc || null, amount: null, hold: false },
+        permit: { enabled: !!r.permit, dueDate: r.permit || null, amount: null, number: '', type: 'National', hold: false },
+      });
+      continue;
+    }
+    const u = JSON.parse(JSON.stringify(ex));
+    if (!u.documents) u.documents = [];
+    if (!u.name && r.name) u.name = r.name;
+    if (!u.chassisNo && r.chassis) u.chassisNo = r.chassis;
+    if (!r.sold) {
+      if (r.tax === 'LIFETIME') {
+        if (!u.tax || !u.tax.isLifetime) u.tax = { isLifetime: true, dueDate: null, amount: null, lifetimeNote: 'Lifetime tax', hold: false, penalty: null };
+      } else if (r.tax && u.tax && !u.tax.isLifetime) {
+        u.tax.dueDate = laterDate(u.tax.dueDate, r.tax);
+      }
+      for (const k of ['insurance', 'fitness', 'puc']) {
+        if (!u[k]) u[k] = { dueDate: null, amount: null, hold: false };
+        u[k].dueDate = laterDate(u[k].dueDate, r[k]);
+      }
+      if (r.permit) {
+        const p = u.permit || { enabled: false, dueDate: null, amount: null, number: '', type: 'National', hold: false };
+        p.enabled = true;
+        p.dueDate = laterDate(p.dueDate, r.permit);
+        u.permit = p;
+      }
+    } else if (u.active) {
+      u.active = false;
+      if (!u.notes) u.notes = 'Sold';
+      sold.push(u.vehicleNo);
+    }
+    if (JSON.stringify(u) !== JSON.stringify(ex)) updates.push(u); else unchanged++;
+  }
+  return { creates, updates, sold, unchanged };
+}
+async function handleImportRegister() {
+  ui.menuOpen = false; render();
+  if (!loaded) { alert('Still loading — try again in a moment.'); return; }
+  const plan = planRegisterImport();
+  const todo = plan.creates.length + plan.updates.length;
+  if (!todo) { alert('Nothing to import — every vehicle in the register is already up to date in the app.'); return; }
+  const msg = `Vehicle register: ${REGISTER_IMPORT.length} vehicles.\n\n` +
+    `• ${plan.creates.length} new vehicle(s) will be added\n` +
+    `• ${plan.updates.length} existing vehicle(s) will be updated\n` +
+    (plan.sold.length ? `• ${plan.sold.length} sold vehicle(s) will be archived (${plan.sold.join(', ')})\n` : '') +
+    `• ${plan.unchanged} already match\n\n` +
+    `Due dates are only moved forward, never back. Amounts, holds, documents and payment history are not touched.\n\nImport now?`;
+  if (!confirm(msg)) return;
+  try {
+    await Promise.all([...plan.creates, ...plan.updates].map(v => saveVehicleRemote(v)));
+    haptic(20);
+    alert(`Done: ${plan.creates.length} added, ${plan.updates.length} updated.`);
+  } catch (err) {
+    console.error(err);
+    alert('Import failed: ' + (err && err.message ? err.message : err) + '\nNothing was lost — you can run it again.');
+  }
+}
+
 // ---------------- app state ----------------
 let vehicles = [];
 let loaded = false;
@@ -581,7 +662,7 @@ function subscribe() {
   });
 }
 // Shown in the ⋮ menu so you can tell which copy of the app a phone is really running.
-const APP_VERSION = '19 Nov · penalty on payment';
+const APP_VERSION = '20 Nov · register import';
 async function saveVehicleRemote(v) {
   if (!isModerator()) throw new Error('This login is view-only.');
   // merge: true so a phone still running an older copy can't wipe fields it doesn't know about (permit, name, hold, penalty).
@@ -1085,6 +1166,7 @@ root.addEventListener('click', (e) => {
   if (action === 'toggle-expand') { handleToggleExpand(id, btn.dataset.section || ''); }
   else if (action === 'toggle-hold') { toggleHold(btn); }
   else if (action === 'sign-out') { ui.menuOpen = false; handleSignOut(); }
+  else if (action === 'import-register') { handleImportRegister(); }
   else if (action === 'toggle-pw') {
     const pw = document.getElementById('login-password');
     if (pw) { const show = pw.type === 'password'; pw.type = show ? 'text' : 'password'; btn.textContent = show ? 'Hide' : 'Show'; }
@@ -1950,6 +2032,7 @@ function renderHeaderMenu() {
     ${ui.menuOpen ? `<div class="menu-dropdown">
       <div class="menu-role">${isModerator() ? '🛠' : '👁'} Signed in as <strong>${isModerator() ? 'Moderator' : 'User'}</strong><br/>${isModerator() ? 'Full access' : 'View and download only'}<br/>App version: ${APP_VERSION}</div>
       ${renderNotifMenuItem()}
+      ${isModerator() ? `<button type="button" class="menu-item" data-action="import-register">📥 Import vehicle register</button>` : ''}
       <button type="button" class="menu-item logout" data-action="sign-out">🚪 Log out</button>
     </div>` : ''}
   </div>`;
